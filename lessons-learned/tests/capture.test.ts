@@ -65,6 +65,8 @@ const queued = (key: string, o: Record<string, unknown> = {}, d: Record<string, 
   repoRoot: null, dismissed: 0, createdAt: "2026-10-01", ...o,
 });
 
+// A repeat dialog also shows the new lesson that Save as new or typed text would write.
+const AS_NEW = `(as a new project lesson: "${TITLE}").`;
 const NEW_QUESTION = `Lesson (project): "${TITLE}" — ${BODY} Save it?`;
 const GLOBAL_A1 = 'Lesson (global): "Lesson a:1" — Why it matters. Save it?';
 const GLOBAL_A2 = 'Lesson (global): "Lesson a:2" — Why it matters. Save it?';
@@ -258,11 +260,40 @@ test("promotes a repeat", async ($: any, on: any) => {
   const seen = setUp(on, { files: filesWith({ pl: [lesson] }), model: [detected({ repeatOf: "P-004" })], asks: ["Promote to rule"] });
   await turn($, seen);
   expect(seen.asks).toEqual([{
-    question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} Promote it to a rule?`,
+    question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`,
     options: ["Promote to rule", "Save as new", "Skip"],
   }]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 2, last: TODAY }]);
+});
+
+test("Save as new on a repeat writes exactly the title and body the dialog showed", async ($: any, on: any) => {
+  const title = "Prefer pwsh over Git Bash";
+  const seen = setUp(on, {
+    files: filesWith({ pl: [entry("P-004", "Use PowerShell")] }),
+    model: [detected({ title, repeatOf: "P-004" })],
+    asks: ["Save as new"],
+  });
+  await turn($, seen);
+  const q = seen.asks[0].question;
+  expect(q).toContain(`"${title}"`);
+  const saved = entriesIn(seen, R.lessons).find((e: any) => e.id !== "P-004");
+  expect(q).toContain(`"${saved.title}"`);
+  expect(q).toContain(saved.body);
+  expect([saved.title, saved.body]).toEqual([title, BODY]);
+});
+
+test("text typed on a broken-rule dialog saves under the title the dialog showed", async ($: any, on: any) => {
+  const title = "Always run the tests first";
+  const seen = setUp(on, {
+    files: filesWith({ pr: [entry("P-003", "Run tests before committing")] }),
+    model: [detected({ title, repeatOf: "P-003" })],
+    asks: ["Run them all."],
+  });
+  await turn($, seen);
+  const [saved] = entriesIn(seen, R.lessons);
+  expect(saved.title).toBe(title);
+  expect(seen.asks[0].question).toContain(`"${title}"`);
 });
 
 test("promote records the rule in promotedThisSession", async ($: any, on: any) => {
@@ -315,7 +346,7 @@ test("notes a broken rule", async ($: any, on: any) => {
   const seen = setUp(on, { files: filesWith({ pr: [rule] }), model: [detected({ repeatOf: "P-003" })], asks: ["Note it"] });
   await turn($, seen);
   expect(seen.asks).toEqual([{
-    question: `Rule P-003 "Run tests before committing" was broken again — ${BODY} Note it?`,
+    question: `Rule P-003 "Run tests before committing" was broken again — ${BODY} ${AS_NEW} Note it?`,
     options: ["Note it", "Skip"],
   }]);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...rule, seen: 3, last: TODAY }]);
@@ -487,8 +518,8 @@ test("two queued repeats of one lesson: the second notes the rule the first prom
   await turnEnd($, seen);
   await turnEnd($, seen);
   expect(seen.asks).toEqual([
-    { question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} Promote it to a rule?`, options: ["Promote to rule", "Save as new", "Skip"] },
-    { question: `Rule P-004 "Use PowerShell" was broken again — ${BODY} Note it?`, options: ["Note it", "Skip"] },
+    { question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`, options: ["Promote to rule", "Save as new", "Skip"] },
+    { question: `Rule P-004 "Use PowerShell" was broken again — ${BODY} ${AS_NEW} Note it?`, options: ["Note it", "Skip"] },
   ]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
@@ -515,7 +546,7 @@ test("a repeat of a rule that was demoted is asked as a repeat of the lesson", a
   const lesson = entry("P-004", "Use PowerShell", { seen: 2 });
   const seen = setUp(on, { files: filesWith({ pl: [lesson] }), store: { queue: [repeatOfP004("a:1", "rule")] }, asks: ["Promote to rule"] });
   await turnEnd($, seen);
-  expect(seen.asks[0].question).toBe(`Looks like a repeat of P-004 "Use PowerShell" — ${BODY} Promote it to a rule?`);
+  expect(seen.asks[0].question).toBe(`Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
 });

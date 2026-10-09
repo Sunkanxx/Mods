@@ -13,15 +13,18 @@ function truncate(text, max) {
   return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
 }
 
-// Every question shows the detected body: what Save, Save as new or Note it is about (spec §7).
-// A repeat names the target by its current title; ctx.target is the entry found now.
+// Every question shows all that any of its answers could write (spec §7). A repeat names the
+// target by its current title (ctx.target is the entry found now) and also shows the
+// detection's own title: Save as new, text typed under Other and the fallback for a target
+// gone meanwhile all save a new lesson under it.
 export function dialogFor(item, ctx) {
   const d = item.detection;
   const target = ctx.target;
+  const asNew = `(as a new ${d.scope} lesson: "${d.title}").`;
   if (target && d.repeatKind === "lesson") {
     return {
       kind: "repeatLesson",
-      question: `Looks like a repeat of ${target.id} "${target.title}" — ${d.body} Promote it to a rule?`,
+      question: `Looks like a repeat of ${target.id} "${target.title}" — ${d.body} ${asNew} Promote it to a rule?`,
       options: ["Promote to rule", "Save as new", "Skip"],
       header: HEADER,
     };
@@ -29,7 +32,7 @@ export function dialogFor(item, ctx) {
   if (target && d.repeatKind === "rule") {
     return {
       kind: "repeatRule",
-      question: `Rule ${target.id} "${target.title}" was broken again — ${d.body} Note it?`,
+      question: `Rule ${target.id} "${target.title}" was broken again — ${d.body} ${asNew} Note it?`,
       options: ["Note it", "Skip"],
       header: HEADER,
     };

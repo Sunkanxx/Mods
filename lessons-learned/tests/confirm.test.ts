@@ -17,7 +17,7 @@ test("repeat of a lesson", () => {
   const it = item({}, { repeatOf: "P-012", repeatKind: "lesson" });
   const d = dialogFor(it, { ...ctx, target: entry("P-012", "Use PowerShell") });
   expect(d.kind).toBe("repeatLesson");
-  expect(d.question).toBe('Looks like a repeat of P-012 "Use PowerShell" — Run it in PowerShell. Promote it to a rule?');
+  expect(d.question).toBe('Looks like a repeat of P-012 "Use PowerShell" — Run it in PowerShell. (as a new project lesson: "Use PowerShell"). Promote it to a rule?');
   expect(d.options).toEqual(["Promote to rule", "Save as new", "Skip"]);
   expect(dialogFor(it, ctx).kind).toBe("new");
 });
@@ -26,7 +26,7 @@ test("repeat of a rule", () => {
   const it = item({}, { repeatOf: "P-003", repeatKind: "rule" });
   const d = dialogFor(it, { ...ctx, target: entry("P-003", "X") });
   expect(d.kind).toBe("repeatRule");
-  expect(d.question).toBe('Rule P-003 "X" was broken again — Run it in PowerShell. Note it?');
+  expect(d.question).toBe('Rule P-003 "X" was broken again — Run it in PowerShell. (as a new project lesson: "Use PowerShell"). Note it?');
   expect(d.options).toEqual(["Note it", "Skip"]);
 });
 
@@ -126,6 +126,17 @@ test("every question shows the text that would be saved and ends with a question
   for (const [it, target] of its) {
     const q = dialogFor(it, { ...ctx, target }).question;
     expect(q).toContain("Run it in PowerShell.");
+    expect(q.endsWith("?")).toBe(true);
+  }
+});
+
+// Save as new, text under Other and the fallbacks write the detection's title: it is shown.
+test("a repeat shows the detection's own title, not only the target's", () => {
+  for (const repeatKind of ["lesson", "rule"]) {
+    const it = item({}, { title: "Prefer pwsh", repeatOf: "P-012", repeatKind });
+    const q = dialogFor(it, { ...ctx, target: entry("P-012", "Use PowerShell") }).question;
+    expect(q).toContain('"Use PowerShell"');
+    expect(q).toContain('(as a new project lesson: "Prefer pwsh")');
     expect(q.endsWith("?")).toBe(true);
   }
 });
