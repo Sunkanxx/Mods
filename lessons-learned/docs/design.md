@@ -326,3 +326,26 @@ points to "keep out of git".
 The repo is created locally first. Creating `github.com/Sunkanxx/Mods` and pushing are separate,
 explicitly confirmed steps. The marketplace name `sunkanxx-mods` must not collide with any
 marketplace the author already has installed.
+
+## 11. Build findings (probe, 2026-10-09)
+
+Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
+`claude -p "hi" --plugin-dir <probe-a> --plugin-dir <probe-b> --output-format stream-json --verbose`.
+`--plugin-dir` was accepted. `$.ui.log` lines arrived as `ui_log` events.
+
+1. **Two simultaneous asks:** open — to be checked by the user in an interactive session (see plan
+   Task 12 step 4). In `-p` mode both `$.ui.ask` calls rejected with
+   `$.tool.call: no tool named "AskUserQuestion" in this session`, so queue/replace behaviour could
+   not be observed. Interactive command (PowerShell, in a folder holding the probe workdir):
+   `claude --plugin-dir <scratchpad>\probe\probe-a --plugin-dir <scratchpad>\probe\probe-b`,
+   send `hi`, then look at the turn end: do both dialogs appear (one after the other = queued), does
+   only one appear (replaced), or does one log `probe-x ask rejected: …` (rejected)? Decision until
+   checked: build confirm with `ASK_RETRY_DELAY_MS = 1500` and one retry (safe under every outcome);
+   if queued is confirmed, ask directly.
+2. **Un-awaited `$.model.complete` from `prompt.submit`, read at `turn.complete`:** yes. Logged
+   `probe-a model: {"isAnswered":true,"text":"ok","usage":{…}} after 1985 ms`. Note the resolved value
+   is an object (`isAnswered`, `text`, `usage`), not a string. Decision: capture starts the call in
+   `prompt.submit` without awaiting and races the promise at `turn.complete`; no
+   `$.clock.after(0, …)` workaround is needed.
+3. **`quoted.md` in `instructionFiles`:** no. `instructionFiles` held `CLAUDE.md` and `plain.md`
+   only; `` `@quoted.md` `` in a code span was not followed. Decision: `AT_STRATEGY = "codespan"`.
