@@ -1,6 +1,5 @@
 import { test, expect } from "claude-code/testing";
 import {
-  AT_STRATEGY,
   parseEntries,
   serializeEntries,
   emptyFile,
@@ -134,13 +133,9 @@ test("cleanBody", () => {
   const long = cleanBody("y".repeat(401));
   expect(long).toHaveLength(400);
   expect(long.endsWith("…")).toBe(true);
-  if (AT_STRATEGY === "codespan") {
-    expect(cleanBody("see @a/b.md now")).toBe("see `@a/b.md` now");
-    expect(cleanBody("see `@a/b.md` now")).toBe("see `@a/b.md` now");
-    expect(cleanBody("mail me@x.com")).toBe("mail me@x.com");
-  } else {
-    expect(cleanBody("see @a/b.md now")).toBe("see @ a/b.md now");
-  }
+  expect(cleanBody("see @a/b.md now")).toBe("see `@a/b.md` now");
+  expect(cleanBody("see `@a/b.md` now")).toBe("see `@a/b.md` now");
+  expect(cleanBody("mail me@x.com")).toBe("mail me@x.com");
 });
 
 test("normaliseTags", () => {
@@ -166,7 +161,7 @@ test("cleanBody keeps the limit and leaves no bare @path", () => {
 });
 
 test("cleanTitle defuses @ and tags drop it", () => {
-  if (AT_STRATEGY === "codespan") expect(cleanTitle("see @a/b.md")).toBe("see `@a/b.md`");
+  expect(cleanTitle("see @a/b.md")).toBe("see `@a/b.md`");
   expect(normaliseTags(["@x/y"])).toEqual(["x/y"]);
 });
 
@@ -183,4 +178,20 @@ test("serialise normalises entry whitespace", () => {
   expect(serializeEntries(f)).toBe(
     `# H\n\n## P-001 · A\n${meta("One.")}\n\n## P-002 · B\n${meta("Two.")}\n\n## P-003 · C\n${meta("Three.")}\n\n`,
   );
+});
+
+test("an odd number of backticks leaves no @path outside a code span", () => {
+  expect(cleanBody("use ` quoting @path")).toBe("use ' quoting `@path`");
+  expect(cleanTitle("use ` quoting @path")).toBe("use ' quoting `@path`");
+  expect(cleanBody("`a` b ` @c `d`")).toBe("'a' b ' `@c` 'd'");
+  expect(cleanBody("keep `@x` paired")).toBe("keep `@x` paired");
+});
+
+test("a BOM before the first entry does not hide it", () => {
+  const t = "\uFEFF## P-001 · First\ntags: a, b · seen: 1 · first: 2026-10-01 · last: 2026-10-01\nOne.\n\n";
+  const f = parseEntries(t);
+  expect(entriesOf(f).map((e) => e.id)).toEqual(["P-001"]);
+  expect(serializeEntries(f)).toBe(t);
+  expect(nextId("project", [f])).toBe("P-002");
+  expect(parseEntries(t.replace(/\n/g, "\r\n")).blocks.map((b) => b.kind)).toEqual(["entry"]);
 });

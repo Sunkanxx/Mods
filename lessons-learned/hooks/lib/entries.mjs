@@ -1,10 +1,6 @@
 // Pure library: parse, edit and serialise the lessons / rules markdown files.
 // No host API in here, so it can be imported straight into tests.
 
-// How an "@path" in stored text is kept from becoming a CLAUDE.md import:
-// "codespan" wraps it in backticks, "space" writes "@ path".
-export const AT_STRATEGY = "codespan";
-
 export const FILE_HEADERS = {
   lessons:
     "# Lessons learned\n\nCorrections confirmed once. Relevant ones are attached to prompts automatically; a repeat promotes one to rules-learned.md. Managed by the lessons-learned mod — edit freely, keep each entry's two first lines.\n",
@@ -48,8 +44,9 @@ export function parseEntries(text) {
   const eol = /\r?\n/.exec(text)?.[0] === "\r\n" ? "\r\n" : "\n";
   const lf = text.replace(/\r\n/g, "\n");
   const starts = [];
-  const re = /^## /gm;
-  for (let m; (m = re.exec(lf)); ) starts.push(m.index);
+  // A leading BOM stays in the header; the entry right after it still starts a block.
+  const re = /^\uFEFF?## /gm;
+  for (let m; (m = re.exec(lf)); ) starts.push(m.index + (m[0].startsWith("\uFEFF") ? 1 : 0));
   const header = lf.slice(0, starts[0] ?? lf.length);
   const blocks = starts.map((s, i) => parseBlock(lf.slice(s, starts[i + 1] ?? lf.length)));
   return { header, blocks, eol };
@@ -134,12 +131,18 @@ function truncate(s, max) {
 }
 
 export function cleanTitle(s) {
-  return truncate(defuseAt(oneLine(s).replace(LEADING_HASHES, "")), TITLE_MAX);
+  return truncate(defuseAt(pairTicks(oneLine(s).replace(LEADING_HASHES, ""))), TITLE_MAX);
 }
 
-// Keep "@path" in stored text from being read as a CLAUDE.md import.
+// An unpaired backtick would shift every code span after it, leaving an "@path" bare:
+// with an odd count, every backtick becomes a straight quote.
+function pairTicks(s) {
+  return (s.match(/`/g)?.length ?? 0) % 2 === 1 ? s.replace(/`/g, "'") : s;
+}
+
+// Keep "@path" in stored text from being read as a CLAUDE.md import: wrap it in a code
+// span, which Claude Code does not follow (spec §11.3).
 function defuseAt(s) {
-  if (AT_STRATEGY === "space") return s.replace(/(^|[^\w`])@(?=\S)/g, "$1@ ");
   return s
     .split(/(`[^`]*`)/)
     .map((part, i) => (i % 2 ? part : part.replace(/(^|[^\w`])(@[^\s`]+)/g, "$1`$2`")))
@@ -147,7 +150,7 @@ function defuseAt(s) {
 }
 
 export function cleanBody(s) {
-  return truncate(defuseAt(oneLine(s).replace(LEADING_HASHES, "")), BODY_MAX);
+  return truncate(defuseAt(pairTicks(oneLine(s).replace(LEADING_HASHES, ""))), BODY_MAX);
 }
 
 export function normaliseTags(tags) {
