@@ -123,34 +123,32 @@ function oneLine(s) {
 
 function truncate(s, max) {
   const chars = Array.from(s);
-  if (chars.length <= max) return s;
-  let cut = chars.slice(0, max - 1);
-  const ticks = cut.filter((c) => c === "`").length;
-  if (ticks % 2 === 1) cut = cut.slice(0, cut.lastIndexOf("`"));
-  return cut.join("") + "…";
+  return chars.length <= max ? s : chars.slice(0, max - 1).join("") + "…";
+}
+
+// Claude Code reads "@path" as an import wherever it starts the text or follows whitespace
+// outside a code span, and a code span is closed only by a backtick run of the same length
+// (an escaped "\`" is no backtick at all): wrapping in backticks cannot be made safe. So every
+// "@" at the start or after whitespace, a backtick or a backslash becomes U+FF20 (fullwidth
+// commercial at), which still reads as "@" but starts no import. An "@" inside a word
+// (me@x.com) stays. Idempotent: the replacement is not "@" (spec §5.5).
+const IMPORT_AT = /(^|[\s`\\])@/g;
+const SAFE_AT = String.fromCodePoint(0xff20);
+
+function defuseAt(s) {
+  return s.replace(IMPORT_AT, `$1${SAFE_AT}`);
+}
+
+function clean(s, max) {
+  return truncate(defuseAt(oneLine(s).replace(LEADING_HASHES, "")), max);
 }
 
 export function cleanTitle(s) {
-  return truncate(defuseAt(pairTicks(oneLine(s).replace(LEADING_HASHES, ""))), TITLE_MAX);
-}
-
-// An unpaired backtick would shift every code span after it, leaving an "@path" bare:
-// with an odd count, every backtick becomes a straight quote.
-function pairTicks(s) {
-  return (s.match(/`/g)?.length ?? 0) % 2 === 1 ? s.replace(/`/g, "'") : s;
-}
-
-// Keep "@path" in stored text from being read as a CLAUDE.md import: wrap it in a code
-// span, which Claude Code does not follow (spec §11.3).
-function defuseAt(s) {
-  return s
-    .split(/(`[^`]*`)/)
-    .map((part, i) => (i % 2 ? part : part.replace(/(^|[^\w`])(@[^\s`]+)/g, "$1`$2`")))
-    .join("");
+  return clean(s, TITLE_MAX);
 }
 
 export function cleanBody(s) {
-  return truncate(defuseAt(pairTicks(oneLine(s).replace(LEADING_HASHES, ""))), BODY_MAX);
+  return clean(s, BODY_MAX);
 }
 
 export function normaliseTags(tags) {

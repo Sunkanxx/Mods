@@ -188,7 +188,7 @@ test("Other text replaces the body and goes through cleanBody", async ($: any, o
   await turn($, seen);
   const [saved] = entriesIn(seen, R.lessons);
   expect(saved.body).toBe(cleanBody(typed));
-  expect(saved.body).toBe("Run it in PowerShell, see `@docs/shell.md`");
+  expect(saved.body).toBe(`Run it in PowerShell, see ${String.fromCodePoint(0xff20)}docs/shell.md`);
   expect(saved.title).toBe(TITLE);
   expect(saved.tags).toEqual(TAGS);
 });

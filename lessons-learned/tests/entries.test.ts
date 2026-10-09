@@ -16,6 +16,11 @@ import {
   FILE_HEADERS,
 } from "../hooks/lib/entries.mjs";
 
+// Claude Code's import scanner reads "@path" after whitespace in any non-code text, and code
+// spans need equal-length backtick runs: the cleaning must not rely on them.
+const IMPORT_AT = /(?:^|[\s`\\])@[^\s]/;
+const FULLWIDTH_AT = String.fromCodePoint(0xff20);
+
 const ENTRY =
   "## P-012 · Use PowerShell\ntags: powershell, claude p · seen: 2 · first: 2026-10-07 · last: 2026-10-08\nBody text.\n";
 
@@ -133,8 +138,8 @@ test("cleanBody", () => {
   const long = cleanBody("y".repeat(401));
   expect(long).toHaveLength(400);
   expect(long.endsWith("…")).toBe(true);
-  expect(cleanBody("see @a/b.md now")).toBe("see `@a/b.md` now");
-  expect(cleanBody("see `@a/b.md` now")).toBe("see `@a/b.md` now");
+  expect(cleanBody("see @a/b.md now")).toBe(`see ${FULLWIDTH_AT}a/b.md now`);
+  expect(cleanBody("see `@a/b.md` now")).toBe(`see \`${FULLWIDTH_AT}a/b.md\` now`);
   expect(cleanBody("mail me@x.com")).toBe("mail me@x.com");
 });
 
@@ -156,13 +161,11 @@ test("addEntry on a header without trailing newline", () => {
 test("cleanBody keeps the limit and leaves no bare @path", () => {
   const out = cleanBody("@a/b.md ".repeat(60));
   expect(Array.from(out).length).toBeLessThanOrEqual(400);
-  expect(out.split(/(`[^`]*`)/).filter((_, i) => i % 2 === 0).join("")).not.toMatch(/@\S/);
-  expect((out.match(/`/g) ?? []).length % 2).toBe(0);
+  expect(out).not.toMatch(IMPORT_AT);
 });
 
-test("cleanTitle defuses @ and tags drop it", () => {
-  expect(cleanTitle("see @a/b.md")).toBe("see `@a/b.md`");
-  expect(normaliseTags(["@x/y"])).toEqual(["x/y"]);
+test("cleanTitle defuses @", () => {
+  expect(cleanTitle("see @a/b.md")).toBe(`see ${FULLWIDTH_AT}a/b.md`);
 });
 
 test("nextId counts ids in malformed raw blocks", () => {
@@ -180,11 +183,12 @@ test("serialise normalises entry whitespace", () => {
   );
 });
 
-test("an odd number of backticks leaves no @path outside a code span", () => {
-  expect(cleanBody("use ` quoting @path")).toBe("use ' quoting `@path`");
-  expect(cleanTitle("use ` quoting @path")).toBe("use ' quoting `@path`");
-  expect(cleanBody("`a` b ` @c `d`")).toBe("'a' b ' `@c` 'd'");
-  expect(cleanBody("keep `@x` paired")).toBe("keep `@x` paired");
+// Backticks are no longer rewritten: the @ is defused whether or not they pair up.
+test("an odd number of backticks leaves no @path that could import", () => {
+  expect(cleanBody("use ` quoting @path")).toBe(`use \` quoting ${FULLWIDTH_AT}path`);
+  expect(cleanTitle("use ` quoting @path")).toBe(`use \` quoting ${FULLWIDTH_AT}path`);
+  expect(cleanBody("`a` b ` @c `d`")).toBe(`\`a\` b \` ${FULLWIDTH_AT}c \`d\``);
+  expect(cleanBody("keep `@x` paired")).toBe(`keep \`${FULLWIDTH_AT}x\` paired`);
 });
 
 test("a BOM before the first entry does not hide it", () => {
@@ -194,4 +198,17 @@ test("a BOM before the first entry does not hide it", () => {
   expect(serializeEntries(f)).toBe(t);
   expect(nextId("project", [f])).toBe("P-002");
   expect(parseEntries(t.replace(/\n/g, "\r\n")).blocks.map((b) => b.kind)).toEqual(["entry"]);
+});
+
+const AT_INPUTS = ["Use ``` @evil.md ` for builds", "Note \\` @evil.md \\` here", "a @b", "@b at start", "x`@b`", "me@x.com"];
+
+test("no @ that could start an import survives cleaning, whatever the backticks", () => {
+  for (const s of AT_INPUTS) {
+    for (const clean of [cleanTitle, cleanBody]) {
+      expect(clean(s)).not.toMatch(IMPORT_AT);
+      expect(clean(clean(s))).toBe(clean(s));
+    }
+  }
+  expect(cleanBody("mail me@x.com")).toBe("mail me@x.com");
+  expect(cleanBody("see @a/b.md now")).toBe(`see ${FULLWIDTH_AT}a/b.md now`);
 });
