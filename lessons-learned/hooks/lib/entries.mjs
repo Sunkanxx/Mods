@@ -152,10 +152,10 @@ export function cleanBody(s) {
 }
 
 // Tags come from model output and go on the tags: line of every entry, rules-learned.md
-// included: only a short keyword survives (letters or digits in any script, inner spaces and
-// hyphens, at most 30 characters and 3 words). Anything else is dropped, not repaired
+// included: only a short keyword survives (letters or digits in any script, then also
+// combining marks, spaces and hyphens; at most 30 characters and 3 words). Anything else is dropped, not repaired
 // (spec §5.5). NFC first, so a decomposed letter (s + combining caron) counts as a letter.
-const TAG = /^[\p{L}\p{N}][\p{L}\p{N} -]{0,29}$/u;
+const TAG = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} -]{0,29}$/u;
 const TAG_WORDS_MAX = 3;
 
 export function normaliseTags(tags) {

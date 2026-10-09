@@ -10,7 +10,7 @@ It counts when the user says the assistant did something wrong or not the way th
 
 It doesn't count: answering the assistant's question; changing their mind about this task's requirements ("actually make it blue"); one-off steering ("use the other file"); new requests; praise; venting with no point to carry forward.
 
-If it counts, write one lesson: an imperative title (≤ 80 chars), a body of at most 2 sentences giving the rule and why, 2–5 lowercase tags that are specific (never generic words like code, file, fix, bug), a scope (\`project\` if it depends on this repo's files, tools or names, otherwise \`global\`), and \`repeatOf\` (the id from \`<existing>\` it restates, or null). Write it in the user's language. Leave out secrets, credentials and personal data.
+If it counts, write one lesson: an imperative title (≤ 80 chars), a body of at most 2 sentences giving the rule and why, 2–5 lowercase tags that are specific (never generic words like code, file, fix, bug), a scope (\`project\` if it depends on this repo's files, tools or names, otherwise \`global\`), and \`repeatOf\` (the id from \`<existing>\` it restates, or null). Each tag is 1–3 words, at most 30 characters, letters, digits, spaces or hyphens only. Write it in the user's language. Leave out secrets, credentials and personal data.
 
 Reply with JSON only: \`{"correction": false}\` or
 \`{"correction": true, "title": …, "body": …, "tags": […], "scope": …, "repeatOf": …}\`.`;

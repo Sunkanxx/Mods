@@ -171,7 +171,8 @@ Detector system prompt (the wording may be tuned against the eval, the meaning n
 > sentences giving the rule and *why*, 2–5 lowercase tags that are specific (never generic
 > words like code, file, fix, bug), a scope (`project` if it depends on this repo's files,
 > tools or names, otherwise `global`), and `repeatOf` (the id from `<existing>` it restates,
-> or null). Write it in the user's language. Leave out secrets, credentials and personal data.
+> or null). Each tag is 1–3 words, at most 30 characters, letters, digits, spaces or hyphens
+> only. Write it in the user's language. Leave out secrets, credentials and personal data.
 >
 > Reply with JSON only: `{"correction": false}` or
 > `{"correction": true, "title": …, "body": …, "tags": […], "scope": …, "repeatOf": …}`.
@@ -265,8 +266,8 @@ Pure functions over file text, plus one writer.
   people and to Claude, and cleaning twice changes nothing. Backticks are left as written: the
   defence does not depend on code spans (§11.3).
 - **Clean tags:** lowercase, trimmed, whitespace collapsed (and NFC); a tag is kept only if it
-  matches `^[\p{L}\p{N}][\p{L}\p{N} -]{0,29}$` (letters or digits in any script, inner spaces
-  and hyphens, ≤ 30 characters) and has at most 3 words; anything else is dropped, not repaired.
+  matches `^[\p{L}\p{N}][\p{L}\p{M}\p{N} -]{0,29}$` (a letter or digit in any script first,
+  then also combining marks, spaces and hyphens; ≤ 30 characters) and has at most 3 words; anything else is dropped, not repaired.
   Generic tags and duplicates are dropped; at most 5 are kept.
 - **Block insert:** idempotent by markers; creates `CLAUDE.md` when none exists.
 

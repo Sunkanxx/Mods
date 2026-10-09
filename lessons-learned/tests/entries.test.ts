@@ -169,6 +169,8 @@ test("normaliseTags keeps only short keyword tags", () => {
     .toEqual(["šumniki", "slash-command", "claude p", "three word tag", "x".repeat(30)]);
   // A decomposed letter (s + combining caron) is composed first, so it still counts as a letter.
   expect(normaliseTags(["s" + String.fromCodePoint(0x30c) + "umniki"])).toEqual(["šumniki"]);
+  // Scripts that need combining marks keep their tags; a mark cannot start one.
+  expect(normaliseTags(["हिन्दी", String.fromCodePoint(0x301) + "abc"])).toEqual(["हिन्दी"]);
 });
 
 test("addEntry on a header without trailing newline", () => {
