@@ -1,0 +1,182 @@
+[
+  {
+    "id": "C01",
+    "previousReply": "I created utils.py with a helper that formats dates and wired it into the report script.",
+    "userMessage": "Don't create new helper files for one-off functions. Keep them in the file where they're used. I always want it that way.",
+    "expect": "correction"
+  },
+  {
+    "id": "C02",
+    "previousReply": "Here is the updated function. I used tabs for indentation.",
+    "userMessage": "This project uses 2 spaces everywhere, never tabs. Please remember that for all files you write.",
+    "expect": "correction"
+  },
+  {
+    "id": "C03",
+    "previousReply": "I ran `npm test` and everything passes.",
+    "userMessage": "You never told me you installed the dependencies first. Always run the install step before the tests, our CI does the same.",
+    "expect": "correction"
+  },
+  {
+    "id": "C04",
+    "previousReply": "I added the new endpoint and committed the change to main.",
+    "userMessage": "Never commit straight to main. We always work on a feature branch and open a pull request.",
+    "expect": "correction"
+  },
+  {
+    "id": "C05",
+    "previousReply": "I edited the config at /etc/app/config.yaml to set the port.",
+    "userMessage": "On my machine the config lives in the user's home folder, not /etc. I'm on Windows, so stop assuming Linux paths.",
+    "expect": "correction"
+  },
+  {
+    "id": "C06",
+    "previousReply": "I wrote the summary as a long paragraph with several nested bullet points.",
+    "userMessage": "I want short answers: three sentences at most, no nested bullets. Do that from now on.",
+    "expect": "correction"
+  },
+  {
+    "id": "C07",
+    "previousReply": "I changed the database schema and updated the model class.",
+    "userMessage": "You skipped the migration again. Every schema change needs a migration file, that is our rule.",
+    "expect": "correction"
+  },
+  {
+    "id": "C08",
+    "previousReply": "I removed the unused import and rewrote the loop with a list comprehension.",
+    "userMessage": "I told you before: don't refactor code I didn't ask about. Only touch what the task needs.",
+    "expect": "correction"
+  },
+  {
+    "id": "C09",
+    "previousReply": "I used the requests library to call the API.",
+    "userMessage": "We can't use requests here, the environment has no internet access for pip. Use the standard library urllib instead, always.",
+    "expect": "correction"
+  },
+  {
+    "id": "C10",
+    "previousReply": "Here's the new component with the colors hard-coded as hex values.",
+    "userMessage": "Colors must come from the theme tokens, never hard-coded hex. That applies to every component in this app.",
+    "expect": "correction"
+  },
+  {
+    "id": "C11",
+    "previousReply": "Dodal sem novo funkcijo in jo takoj poklical iz glavnega modula.",
+    "userMessage": "Ne kliči novih funkcij iz glavnega modula brez testa. Vedno najprej napiši test, to je naše pravilo.",
+    "expect": "correction"
+  },
+  {
+    "id": "C12",
+    "previousReply": "Datoteko sem shranil kot report_final_v2.docx v mapo Downloads.",
+    "userMessage": "Poročila vedno shrani v mapo reports, nikoli v Downloads. To velja za vse projekte.",
+    "expect": "correction"
+  },
+  {
+    "id": "C13",
+    "previousReply": "Odgovoril sem v angleščini in dodal dolg uvod o tem, kaj bom naredil.",
+    "userMessage": "Vedno odgovarjaj v slovenščini in preskoči uvod. Samo rezultat, prosim.",
+    "expect": "correction"
+  },
+  {
+    "id": "C14",
+    "previousReply": "I deleted the old build folder and ran the build again.",
+    "userMessage": "Please ask before deleting anything. Last time you removed files I still needed, and I want a confirmation first every time.",
+    "expect": "correction"
+  },
+  {
+    "id": "C15",
+    "previousReply": "I pushed a fix and said the bug is resolved.",
+    "userMessage": "You said it's resolved without running it. Verify the fix by actually running the program before claiming it works.",
+    "expect": "correction"
+  },
+  {
+    "id": "N01",
+    "previousReply": "Which option do you prefer for the layout: A) a sidebar, or B) a top navigation bar?",
+    "userMessage": "B",
+    "expect": "none"
+  },
+  {
+    "id": "N02",
+    "previousReply": "Should I go ahead and overwrite the existing file?",
+    "userMessage": "yes",
+    "expect": "none"
+  },
+  {
+    "id": "N03",
+    "previousReply": "I updated the settings in config_old.json as requested.",
+    "userMessage": "use the other file",
+    "expect": "none"
+  },
+  {
+    "id": "N04",
+    "previousReply": "I made the header background green as you described.",
+    "userMessage": "actually make it blue",
+    "expect": "none"
+  },
+  {
+    "id": "N05",
+    "previousReply": "Done. The function now returns a sorted list and all tests pass.",
+    "userMessage": "thanks, perfect",
+    "expect": "none"
+  },
+  {
+    "id": "N06",
+    "previousReply": "The login form is finished and works with the validation rules.",
+    "userMessage": "now add tests",
+    "expect": "none"
+  },
+  {
+    "id": "N07",
+    "previousReply": "I switched the sort from quicksort to merge sort.",
+    "userMessage": "why did you do that?",
+    "expect": "none"
+  },
+  {
+    "id": "N08",
+    "previousReply": "I ran the script and it finished.",
+    "userMessage": "Traceback (most recent call last):\n  File \"main.py\", line 12, in <module>\n    result = load(path)\n  File \"main.py\", line 7, in load\n    return open(path).read()\nFileNotFoundError: [Errno 2] No such file or directory: 'data.csv'",
+    "expect": "none"
+  },
+  {
+    "id": "N09",
+    "previousReply": "I created the README with an installation section.",
+    "userMessage": "Great, now write a changelog too.",
+    "expect": "none"
+  },
+  {
+    "id": "N10",
+    "previousReply": "The page lists ten items per page.",
+    "userMessage": "Can you show twenty items per page for this screen?",
+    "expect": "none"
+  },
+  {
+    "id": "N11",
+    "previousReply": "I renamed the variable total to sum_total in the module.",
+    "userMessage": "hmm, not sure about that name. Can you explain what you were thinking?",
+    "expect": "none"
+  },
+  {
+    "id": "N12",
+    "previousReply": "The chart now uses a blue and orange palette.",
+    "userMessage": "for this one, just make the lines thicker",
+    "expect": "none"
+  },
+  {
+    "id": "N13",
+    "previousReply": "I opened the file in the editor and fixed the typo on line 4.",
+    "userMessage": "ugh, this is so annoying",
+    "expect": "none"
+  },
+  {
+    "id": "N14",
+    "previousReply": "Which folder should I put the exports in?",
+    "userMessage": "the exports folder in the root",
+    "expect": "none"
+  },
+  {
+    "id": "N15",
+    "previousReply": "I can either refactor the parser now or fix the failing test first. Which one?",
+    "userMessage": "fix the test first, then the parser",
+    "expect": "none"
+  }
+]

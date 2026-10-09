@@ -4,6 +4,7 @@ import { mock } from "claude-code/testing";
 //
 // Options (all optional):
 //   files      Record<path, text>  starting file system (in memory; writes update it)
+//   pluginFiles Record<relPath, text>  files shipped in the plugin folder, read from any path ending in /relPath
 //   env        Record<name, text>  environment (default { USERPROFILE: "C:\\Users\\u" })
 //   repo       { root } | null     $.session.repo() (default null: not in a git repo)
 //   surfaces   string[]            $.session.surfaces() (default ["terminal"]; [] is a -p run)
@@ -52,6 +53,7 @@ type Matcher = boolean | ((path: string) => boolean);
 
 export type WorldOptions = {
   files?: Record<string, string>;
+  pluginFiles?: Record<string, string>;
   env?: Record<string, string>;
   repo?: { root: string } | null;
   surfaces?: string[];
@@ -91,6 +93,8 @@ export function world(on: any, opts: WorldOptions = {}) {
 
   const exists = (path: string) => seen.files.has(path);
   const read = (path: string) => {
+    const shipped = Object.entries(opts.pluginFiles ?? {}).find(([rel]) => path.replaceAll("\\", "/").endsWith(`/${rel}`));
+    if (shipped) return shipped[1];
     if (matches(opts.readFails, path) || !seen.files.has(path)) throw new Error(`cannot read ${path}`);
     return seen.files.get(path);
   };

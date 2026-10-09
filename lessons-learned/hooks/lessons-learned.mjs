@@ -114,8 +114,8 @@ export function register(on, options) {
     try {
       await $.command.register({
         name: "lessons",
-        description: "Learned lessons and rules: list, review, promote, demote, delete, setup, pause, resume",
-        argumentHint: "[review|promote <id>|demote <id>|delete <id>|setup|pause|resume]",
+        description: "Learned lessons and rules: list, review, promote, demote, delete, setup, pause, resume, eval",
+        argumentHint: "[review|promote <id>|demote <id>|delete <id>|setup|pause|resume|eval]",
       });
     } catch (err) {
       debug($, `command not registered: ${err?.message ?? err}`);
@@ -293,6 +293,17 @@ async function existingEntries($) {
   return existing;
 }
 
+// One detector request, the same for capture and for `/lessons eval`; resolves to the reply text.
+async function askDetector($, { previousReply, userMessage, existing, projectSetUp }) {
+  const reply = await $.model.complete({
+    model: cfg.model,
+    system: DETECTOR_SYSTEM,
+    prompt: buildDetectorPrompt({ previousReply, userMessage, existing, projectSetUp }),
+    maxTokens: DETECTOR_MAX_TOKENS,
+  });
+  return typeof reply === "string" ? reply : reply?.text;
+}
+
 // The detector call, parsed and queued. Never rejects: any failure is "no correction".
 async function detect($, { prompt, previousReply, key }) {
   try {
@@ -300,13 +311,10 @@ async function detect($, { prompt, previousReply, key }) {
     const projectSetUp = !!ctx.project?.setUp;
     const existing = await existingEntries($);
     const known = new Map(existing.map((x) => [x.id, x.kind]));
-    const reply = await $.model.complete({
-      model: cfg.model,
-      system: DETECTOR_SYSTEM,
-      prompt: buildDetectorPrompt({ previousReply, userMessage: prompt, existing, projectSetUp }),
-      maxTokens: DETECTOR_MAX_TOKENS,
-    });
-    const detection = parseDetectorReply(typeof reply === "string" ? reply : reply?.text, { known, projectSetUp });
+    const detection = parseDetectorReply(
+      await askDetector($, { previousReply, userMessage: prompt, existing, projectSetUp }),
+      { known, projectSetUp },
+    );
     if (!detection) return null;
     const item = {
       key,
@@ -543,7 +551,7 @@ export async function promote($, scope, id) {
 
 // ---------- /lessons (spec §5.6) ----------
 
-const USAGE = "Usage: /lessons [review | promote <id> | demote <id> | delete <id> | setup | pause | resume]";
+const USAGE = "Usage: /lessons [review | promote <id> | demote <id> | delete <id> | setup | pause | resume | eval]";
 
 async function runCommand($, args) {
   const [, verb = "", rest = ""] = /^(\S*)\s*([\s\S]*)$/.exec(args.trim()) ?? [];
@@ -556,6 +564,7 @@ async function runCommand($, args) {
   }
   if (word === "review") return await reviewText($);
   if (word === "setup") return await setupText($);
+  if (word === "eval") return await evalText($);
   if (word === "promote" || word === "demote" || word === "delete") {
     if (id === "") return USAGE;
     return await changeEntry($, word, id);
@@ -606,6 +615,42 @@ async function reviewText($) {
   } finally {
     asking = false;
   }
+}
+
+// Detector eval (spec §9.5): every case through the real detector request, one after the other.
+async function evalText($) {
+  let cases;
+  try {
+    cases = JSON.parse(await $.fs.read(`${$.plugin.root}/eval/cases.json`));
+  } catch (err) {
+    debug($, `eval cases not read: ${err?.message ?? err}`);
+    return "The eval cases could not be read.";
+  }
+  const falsePositives = [];
+  const missed = [];
+  const errors = [];
+  for (const c of cases) {
+    let parsed;
+    try {
+      const text = await askDetector($, { previousReply: c.previousReply, userMessage: c.userMessage, existing: [], projectSetUp: false });
+      if (typeof text !== "string") throw new Error("no reply");
+      parsed = parseDetectorReply(text, { known: new Map(), projectSetUp: false });
+    } catch (err) {
+      debug($, `eval case ${c.id} failed: ${err?.message ?? err}`);
+      errors.push(c.id);
+      continue;
+    }
+    if (parsed && c.expect === "none") falsePositives.push(c.id);
+    if (!parsed && c.expect === "correction") missed.push(c.id);
+  }
+  const corrections = cases.filter((c) => c.expect === "correction");
+  const lookAlikes = cases.length - corrections.length;
+  const found = corrections.length - missed.length - corrections.filter((c) => errors.includes(c.id)).length;
+  const lines = [`Detected: ${found}/${corrections.length} · False positives: ${falsePositives.length}/${lookAlikes}`];
+  if (falsePositives.length > 0) lines.push(`False positives: ${falsePositives.join(", ")}`);
+  if (missed.length > 0) lines.push(`Missed: ${missed.join(", ")}`);
+  if (errors.length > 0) lines.push(`Errors: ${errors.join(", ")}`);
+  return lines.join("\n");
 }
 
 async function setupText($) {

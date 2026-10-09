@@ -7,7 +7,7 @@ const DIR = "C:\\Users\\u\\.claude";
 const G = { lessons: `${DIR}\\lessons-learned.md`, rules: `${DIR}\\rules-learned.md`, md: `${DIR}\\CLAUDE.md` };
 const REPO = "C:\\r";
 const R = { lessons: `${REPO}\\lessons-learned.md`, rules: `${REPO}\\rules-learned.md`, md: `${REPO}\\CLAUDE.md` };
-const USAGE = "Usage: /lessons [review | promote <id> | demote <id> | delete <id> | setup | pause | resume]";
+const USAGE = "Usage: /lessons [review | promote <id> | demote <id> | delete <id> | setup | pause | resume | eval]";
 
 const entry = (id: string, title: string, o: Record<string, unknown> = {}) => ({
   id, title, tags: ["alpha", "beta"], seen: 1, first: "2026-10-01", last: "2026-10-01", body: "Body.", ...o,
@@ -35,8 +35,8 @@ test("registers the command on session start", async ($: any, on: any) => {
   await $.session.start({ cwd: REPO } as any);
   expect(seen.commands).toEqual([{
     name: "lessons",
-    description: "Learned lessons and rules: list, review, promote, demote, delete, setup, pause, resume",
-    argumentHint: "[review|promote <id>|demote <id>|delete <id>|setup|pause|resume]",
+    description: "Learned lessons and rules: list, review, promote, demote, delete, setup, pause, resume, eval",
+    argumentHint: "[review|promote <id>|demote <id>|delete <id>|setup|pause|resume|eval]",
   }]);
 });
 
