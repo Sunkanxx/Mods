@@ -7,6 +7,7 @@ import { mock } from "claude-code/testing";
 //   pluginFiles Record<relPath, text>  files shipped in the plugin folder, read from any path ending in /relPath
 //   env        Record<name, text>  environment (default { USERPROFILE: "C:\\Users\\u" })
 //   repo       { root } | null     $.session.repo() (default null: not in a git repo)
+//   cwd        string              $.session.cwd() (default the repo root, else the home folder)
 //   surfaces   string[]            $.session.surfaces() (default ["terminal"]; [] is a -p run)
 //   asks       (string | { reject: true } | { answer?, delay })[]  scripted $.ui.ask answers,
 //                                  used in order; an empty queue rejects, as a dismissed dialog
@@ -32,6 +33,7 @@ import { mock } from "claude-code/testing";
 //   files      Map<path, text>     the current file system
 //   writes     { path, text }[]    every $.fs.write, in order
 //   asks       { question, options }[]   every $.ui.ask made
+//   headers    (string | undefined)[]    the header of every $.ui.ask, in the same order
 //   logs       { text, to }[]      every $.ui.log
 //   modelCalls ModelCompleteRequest[]    every $.model.complete request
 //   commands   every $.command.register request
@@ -56,6 +58,7 @@ export type WorldOptions = {
   pluginFiles?: Record<string, string>;
   env?: Record<string, string>;
   repo?: { root: string } | null;
+  cwd?: string;
   surfaces?: string[];
   asks?: (string | Reject | Held)[];
   model?: ModelReply[];
@@ -79,6 +82,7 @@ export function world(on: any, opts: WorldOptions = {}) {
     files: new Map<string, string>(Object.entries(opts.files ?? {})),
     writes: [] as { path: string; text: string }[],
     asks: [] as { question: string; options: string[] }[],
+    headers: [] as (string | undefined)[],
     logs: [] as { text: string; to: string }[],
     modelCalls: [] as any[],
     commands: [] as any[],
@@ -105,8 +109,9 @@ export function world(on: any, opts: WorldOptions = {}) {
   };
   const log = (text: string, to: string) => void seen.logs.push({ text, to });
   // Records the ask and answers it; a dismissal (or an empty queue) rejects.
-  const ask = (question: string, options: string[]) => {
+  const ask = (question: string, options: string[], header?: string) => {
     seen.asks.push({ question, options });
+    seen.headers.push(header);
     const answer = asks.shift();
     if (answer && typeof answer === "object" && "delay" in answer) {
       return seen.clock.sleep(answer.delay).then(() => {
@@ -128,6 +133,7 @@ export function world(on: any, opts: WorldOptions = {}) {
   };
   const session = {
     repo: () => opts.repo ?? null,
+    cwd: () => opts.cwd ?? opts.repo?.root ?? "C:\\Users\\u",
     surfaces: () => opts.surfaces ?? ["terminal"],
     messages: () => (typeof opts.messages === "function" ? opts.messages() : opts.messages ?? []),
     id: () => opts.sessionId ?? "s1",
@@ -148,6 +154,7 @@ export function world(on: any, opts: WorldOptions = {}) {
   on("fs.read", (_$: any, e: any) => ({ value: read(e.path) }));
   on("fs.write", (_$: any, e: any) => ({ value: write(e.path, e.text) }));
   on("session.repo", () => ({ value: session.repo() }));
+  on("session.cwd", () => ({ value: session.cwd() }));
   on("session.surfaces", () => ({ value: session.surfaces() }));
   on("session.messages", async () => ({ value: await session.messages() }));
   on("session.id", () => ({ value: session.id() }));
@@ -163,7 +170,7 @@ export function world(on: any, opts: WorldOptions = {}) {
     if (opts.allowTools?.includes(e.tool)) return { result: "", text: "" };
     if (e.tool !== "AskUserQuestion") throw new Error(`unexpected tool call: ${e.tool}`);
     const q = e.questions[0];
-    const answer = await ask(q.question, q.options.map((o: any) => o.label));
+    const answer = await ask(q.question, q.options.map((o: any) => o.label), q.header);
     return { result: { answers: { [q.question]: answer } }, text: answer };
   });
   on("model.complete", async (_$: any, e: any) => ({ value: await complete(e) }));
@@ -181,7 +188,7 @@ export function world(on: any, opts: WorldOptions = {}) {
     },
     session: asyncOf(session),
     store: asyncOf(store),
-    ui: { log: (text: string, o?: any) => log(text, o?.to ?? "transcript"), ask: async (q: string, o: any) => ask(q, Array.isArray(o) ? o : o?.options ?? []) },
+    ui: { log: (text: string, o?: any) => log(text, o?.to ?? "transcript"), ask: async (q: string, o: any) => ask(q, Array.isArray(o) ? o : o?.options ?? [], Array.isArray(o) ? undefined : o?.header) },
     model: asyncOf({ complete }),
   };
   return seen;

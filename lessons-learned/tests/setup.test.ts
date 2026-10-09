@@ -32,7 +32,7 @@ test("creates global files and block on first start", async ($: any, on: any) =>
     [G.md]: insertBlock(null, "rules-learned.md"),
   });
   expect(seen.asks).toEqual([]);
-  expect(seen.store.get("globalSetupDone")).toBe(true);
+  expect([...seen.store.keys()]).toEqual([]);
 });
 
 test("respects CLAUDE_CONFIG_DIR", async ($: any, on: any) => {
@@ -87,6 +87,7 @@ test("asks once per repo", async ($: any, on: any) => {
   const seen = world(on, { repo: { root: REPO }, asks: ["Not here"] });
   await start($, seen);
   expect(seen.asks).toEqual([{ question: QUESTION, options: OPTIONS }]);
+  expect(seen.headers).toEqual(["Lesson"]);
 });
 
 test("Yes, commit them writes the project files and block", async ($: any, on: any) => {
@@ -164,10 +165,10 @@ test("a removed project block asks again", async ($: any, on: any) => {
   expect(seen.asks).toHaveLength(1);
 });
 
-test("no surfaces: global setup runs, no project ask", async ($: any, on: any) => {
+test("no surfaces: no setup at all", async ($: any, on: any) => {
   const seen = world(on, { repo: { root: REPO }, surfaces: [] });
   await start($, seen);
-  expect(seen.writes.map((w: any) => w.path)).toContain(G.md);
+  expect(seen.writes).toEqual([]);
   expect(seen.asks).toEqual([]);
 });
 
@@ -183,7 +184,6 @@ test("an fs failure does not throw and logs once to debug", async ($: any, on: a
   await start($, seen);
   expect(seen.logs).toHaveLength(1);
   expect(seen.logs[0].to).toBe("debug");
-  expect(seen.store.has("globalSetupDone")).toBe(false);
 });
 
 test("an unreadable CLAUDE.md is never overwritten", async ($: any, on: any) => {
@@ -268,4 +268,36 @@ test("a set-up project with a deleted lessons file gets it back and nothing else
   const seen = world(on, { files: { ...GLOBAL_FILES, [R.md]: insertBlock(null, "rules-learned.md"), [R.rules]: RULES }, repo: { root: REPO } });
   await start($, seen);
   expect(written(seen)).toEqual({ [R.lessons]: LESSONS });
+});
+
+// ---------- worktrees: the session's own working tree, not the main checkout ----------
+
+const WT = "C:\\wt";
+const W = { lessons: `${WT}\\lessons-learned.md`, rules: `${WT}\\rules-learned.md`, md: `${WT}\\CLAUDE.md` };
+
+test("a worktree session sets up the worktree, not the main checkout", async ($: any, on: any) => {
+  const seen = world(on, {
+    files: { ...GLOBAL_FILES, [`${REPO}\\.git`]: "", [`${WT}\\.git`]: `gitdir: ${REPO}\\.git\\worktrees\\wt\n` },
+    repo: { root: REPO },
+    cwd: `${WT}\\src`,
+    asks: ["Yes, commit them"],
+  });
+  await start($, seen, WT);
+  expect(written(seen)).toEqual({ [W.lessons]: LESSONS, [W.rules]: RULES, [W.md]: insertBlock(null, "rules-learned.md") });
+  const p = await readScope(seen.$, "project");
+  expect(p!.paths).toEqual({ lessons: W.lessons, rules: W.rules });
+});
+
+test("the main checkout is found from a subfolder by its .git folder", async ($: any, on: any) => {
+  const seen = world(on, { files: { ...GLOBAL_FILES, [`${REPO}\\.git`]: "" }, repo: { root: REPO }, cwd: `${REPO}\\a\\b`, asks: ["Yes, commit them"] });
+  await start($, seen);
+  expect(Object.keys(written(seen))).toEqual([R.lessons, R.rules, R.md]);
+});
+
+test("a working directory that cannot be read falls back to the repository root", async ($: any, on: any) => {
+  const seen = world(on, { files: { ...GLOBAL_FILES, [R.md]: insertBlock(null, "rules-learned.md") }, repo: { root: REPO } });
+  seen.$.session.cwd = async () => { throw new Error("no cwd"); };
+  const p = await readScope(seen.$, "project");
+  expect(p!.paths).toEqual({ lessons: R.lessons, rules: R.rules });
+  expect(seen.logs.filter((l: any) => l.to === "debug")).toHaveLength(1);
 });

@@ -1,6 +1,6 @@
 // Pure confirmation logic: builds dialogs and interprets answers. No host calls.
 
-const HEADER = "Lesson";
+export const HEADER = "Lesson";
 const CANCEL = "Cancel promotion";
 const TITLE_MAX = 40;
 
@@ -13,13 +13,15 @@ function truncate(text, max) {
   return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
 }
 
+// Every question shows the detected body: what Save, Save as new or Note it is about (spec §7).
+// A repeat names the target by its current title; ctx.target is the entry found now.
 export function dialogFor(item, ctx) {
   const d = item.detection;
   const target = ctx.target;
   if (target && d.repeatKind === "lesson") {
     return {
       kind: "repeatLesson",
-      question: `Looks like a repeat of ${target.id} "${target.title}". Promote it to a rule?`,
+      question: `Looks like a repeat of ${target.id} "${target.title}" — ${d.body} Promote it to a rule?`,
       options: ["Promote to rule", "Save as new", "Skip"],
       header: HEADER,
     };
@@ -27,7 +29,7 @@ export function dialogFor(item, ctx) {
   if (target && d.repeatKind === "rule") {
     return {
       kind: "repeatRule",
-      question: `Rule ${target.id} "${target.title}" was broken again. Note it?`,
+      question: `Rule ${target.id} "${target.title}" was broken again — ${d.body} Note it?`,
       options: ["Note it", "Skip"],
       header: HEADER,
     };
@@ -37,7 +39,7 @@ export function dialogFor(item, ctx) {
   options.push("Skip");
   return {
     kind: "new",
-    question: `Lesson: "${d.title}" (${d.scope}). Save it?`,
+    question: `Lesson (${d.scope}): "${d.title}" — ${d.body} Save it?`,
     options,
     header: HEADER,
   };
@@ -92,6 +94,8 @@ export function interpretCap(answer, rules, candidates) {
   return typed ? typed.id : null;
 }
 
+// An item tied to a repo (project scope, or a repeat of a P- entry) is offered only there.
 export function offerable(item, repoRoot) {
-  return item.detection.scope === "global" || (repoRoot != null && repoRoot === item.repoRoot);
+  if (item.repoRoot != null) return repoRoot === item.repoRoot;
+  return item.detection.scope === "global";
 }

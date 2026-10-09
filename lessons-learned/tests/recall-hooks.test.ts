@@ -71,13 +71,31 @@ test("new session id resets", async ($: any, on: any) => {
   expect((await submit($, "powershell quoting")).context).toHaveLength(1);
 });
 
+const TRANSCRIPT = [{ role: "user", text: "fix the quoting", toolUses: [] }, { role: "assistant", text: "Done.", toolUses: [] }];
+const SUMMARY = [{ role: "user", text: "summary", toolUses: [] }];
+
 test("session.compact resets", async ($: any, on: any) => {
   setUp(on);
-  on("session.compact", () => ({ messages: [{ role: "user", text: "summary", toolUses: [] }] }));
+  on("session.compact", () => ({ messages: SUMMARY }));
   expect((await submit($, "powershell quoting")).context).toHaveLength(1);
-  await $.session.compact({ instructions: "keep going" });
+  await $.session.compact({ trigger: "manual", messages: TRANSCRIPT, instructions: "keep going" });
   expect((await submit($, "powershell quoting")).context).toHaveLength(1);
 });
+
+const NO_RESET: [string, Record<string, unknown>, Record<string, unknown>][] = [
+  ["a vetoed compaction", { trigger: "manual", messages: TRANSCRIPT }, { skip: "not now" }],
+  ["a precompute", { trigger: "precompute", messages: TRANSCRIPT }, { messages: SUMMARY }],
+  ["a subagent's compaction", { trigger: "auto", agentId: "agent-1", messages: TRANSCRIPT }, { messages: SUMMARY }],
+];
+for (const [name, input, result] of NO_RESET) {
+  test(`${name} does not reset recall`, async ($: any, on: any) => {
+    setUp(on);
+    on("session.compact", () => result);
+    expect((await submit($, "powershell quoting")).context).toHaveLength(1);
+    expect(await $.session.compact(input)).toEqual(result);
+    expect((await submit($, "powershell quoting")).context).toBeUndefined();
+  });
+}
 
 test("attaches promoted rules once", async ($: any, on: any) => {
   const lesson = entry("P-004", "Use PowerShell", { tags: ["alpha", "beta"] });

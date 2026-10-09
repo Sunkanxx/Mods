@@ -2,7 +2,7 @@ import { test, expect } from "claude-code/testing";
 import {
   BLOCK_START, BLOCK_END, blockText, hasBlock, insertBlock, addIgnoreLines, pickClaudeMd,
 } from "../hooks/lib/claude-md.mjs";
-import { joinPath, configDirFrom, scopeFiles } from "../hooks/lib/paths.mjs";
+import { joinPath, configDirFrom, scopeFiles, selfAndParents } from "../hooks/lib/paths.mjs";
 
 const BLOCK =
   "<!-- lessons-learned:start -->\n## Learned rules\n@rules-learned.md\n" +
@@ -84,4 +84,12 @@ test("scopeFiles", () => {
     rules: "/home/x/.claude/rules-learned.md",
   });
   expect(scopeFiles("C:\\r").rules).toBe("C:\\r\\rules-learned.md");
+});
+
+test("selfAndParents walks up to the root", () => {
+  expect(selfAndParents("C:\\r\\wt\\src")).toEqual(["C:\\r\\wt\\src", "C:\\r\\wt", "C:\\r", "C:\\"]);
+  expect(selfAndParents("C:\\r\\")).toEqual(["C:\\r", "C:\\"]);
+  expect(selfAndParents("C:\\")).toEqual(["C:\\"]);
+  expect(selfAndParents("/home/u/r")).toEqual(["/home/u/r", "/home/u", "/home", "/"]);
+  expect(selfAndParents("/")).toEqual(["/"]);
 });

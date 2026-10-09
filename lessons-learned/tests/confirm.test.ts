@@ -1,14 +1,14 @@
 import { test, expect } from "claude-code/testing";
 import { dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "../hooks/lib/confirm.mjs";
 
-const det = (o = {}) => ({ title: "Use PowerShell", body: "b", tags: ["a", "b"], scope: "project", repeatOf: null, repeatKind: null, ...o });
+const det = (o = {}) => ({ title: "Use PowerShell", body: "Run it in PowerShell.", tags: ["a", "b"], scope: "project", repeatOf: null, repeatKind: null, ...o });
 const item = (o = {}, d = {}) => ({ key: "k", detection: det(d), repoRoot: "/r", dismissed: 0, createdAt: "2026-10-01", ...o });
 const entry = (id, title, o = {}) => ({ id, title, tags: [], seen: 1, first: "2026-01-01", last: "2026-01-01", body: "x", ...o });
 const ctx = { projectAvailable: true, target: null };
 
 test("new lesson dialog", () => {
   const d = dialogFor(item(), ctx);
-  expect(d).toEqual({ kind: "new", question: 'Lesson: "Use PowerShell" (project). Save it?', options: ["Save", "Save as global", "Skip"], header: "Lesson" });
+  expect(d).toEqual({ kind: "new", question: 'Lesson (project): "Use PowerShell" — Run it in PowerShell. Save it?', options: ["Save", "Save as global", "Skip"], header: "Lesson" });
   expect(dialogFor(item({}, { scope: "global" }), ctx).options).toEqual(["Save", "Save to project", "Skip"]);
   expect(dialogFor(item(), { ...ctx, projectAvailable: false }).options).toEqual(["Save", "Skip"]);
 });
@@ -17,7 +17,7 @@ test("repeat of a lesson", () => {
   const it = item({}, { repeatOf: "P-012", repeatKind: "lesson" });
   const d = dialogFor(it, { ...ctx, target: entry("P-012", "Use PowerShell") });
   expect(d.kind).toBe("repeatLesson");
-  expect(d.question).toBe('Looks like a repeat of P-012 "Use PowerShell". Promote it to a rule?');
+  expect(d.question).toBe('Looks like a repeat of P-012 "Use PowerShell" — Run it in PowerShell. Promote it to a rule?');
   expect(d.options).toEqual(["Promote to rule", "Save as new", "Skip"]);
   expect(dialogFor(it, ctx).kind).toBe("new");
 });
@@ -26,7 +26,7 @@ test("repeat of a rule", () => {
   const it = item({}, { repeatOf: "P-003", repeatKind: "rule" });
   const d = dialogFor(it, { ...ctx, target: entry("P-003", "X") });
   expect(d.kind).toBe("repeatRule");
-  expect(d.question).toBe('Rule P-003 "X" was broken again. Note it?');
+  expect(d.question).toBe('Rule P-003 "X" was broken again — Run it in PowerShell. Note it?');
   expect(d.options).toEqual(["Note it", "Skip"]);
 });
 
@@ -83,10 +83,14 @@ test("capDialog and interpretCap", () => {
 });
 
 test("offerable", () => {
-  expect(offerable(item({}, { scope: "global" }), null)).toBe(true);
+  expect(offerable(item({ repoRoot: null }, { scope: "global" }), null)).toBe(true);
   expect(offerable(item(), "/r")).toBe(true);
   expect(offerable(item(), "/other")).toBe(false);
   expect(offerable(item(), null)).toBe(false);
+  // An item that belongs to a repo (a repeat of a P- entry) needs that repo, whatever its scope.
+  expect(offerable(item({}, { scope: "global" }), "/other")).toBe(false);
+  expect(offerable(item({}, { scope: "global" }), null)).toBe(false);
+  expect(offerable(item({ repoRoot: null }, { scope: "global" }), "/other")).toBe(true);
 });
 
 test("promote and note take the id from the item, not the question", () => {
@@ -111,4 +115,17 @@ test("a label of another dialog kind is Other text", () => {
   const ru = item({}, { repeatOf: "P-003", repeatKind: "rule" });
   const ud = dialogFor(ru, { ...ctx, target: entry("P-003", "X") });
   expect(interpret("Save", ru, ud)).toEqual({ type: "save", scope: "project", body: "Save" });
+});
+
+test("every question shows the text that would be saved and ends with a question mark", () => {
+  const its = [
+    [item(), null],
+    [item({}, { repeatOf: "P-012", repeatKind: "lesson" }), entry("P-012", "Old title")],
+    [item({}, { repeatOf: "P-003", repeatKind: "rule" }), entry("P-003", "Old title")],
+  ] as const;
+  for (const [it, target] of its) {
+    const q = dialogFor(it, { ...ctx, target }).question;
+    expect(q).toContain("Run it in PowerShell.");
+    expect(q.endsWith("?")).toBe(true);
+  }
 });

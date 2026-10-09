@@ -10,12 +10,11 @@ import {
   addEntry, removeEntry, replaceEntry, findEntry, entriesOf, nextId, bumpSeen, cleanBody,
 } from "./lib/entries.mjs";
 import { hasBlock, insertBlock, addIgnoreLines, pickClaudeMd } from "./lib/claude-md.mjs";
-import { joinPath, configDirFrom, scopeFiles } from "./lib/paths.mjs";
+import { joinPath, configDirFrom, scopeFiles, selfAndParents } from "./lib/paths.mjs";
 import { DETECTOR_SYSTEM, shouldSkip, buildDetectorPrompt, parseDetectorReply } from "./lib/detector.mjs";
 import { matchLessons, formatBlock, RECALL_LEAD, RULES_LEAD, rememberPath } from "./lib/recall.mjs";
-import { dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "./lib/confirm.mjs";
+import { HEADER, dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "./lib/confirm.mjs";
 
-export const KEY_GLOBAL_DONE = "globalSetupDone";
 export const KEY_QUEUE = "queue";
 export const KEY_REVIEW = "review";
 export const optOutKey = (root) => `optOut:${root}`;
@@ -29,14 +28,18 @@ const GLOBAL_IMPORT = "rules-learned.md";
 
 const DETECTOR_MAX_TOKENS = 400;
 const DETECTION_WAIT_MS = 5000;
-const DIALOG_HEADER = "Lesson";
+const ALREADY_OPEN = "A lesson dialog is already open.";
+// withAsk's answer while another dialog of this mod is open; ask's answer for a closed dialog.
+const BUSY = Symbol("busy");
+const DISMISSED = Symbol("dismissed");
 
 // Set by register(); later hooks read it.
 let cfg = { model: "haiku", ruleCap: 20, maxRecall: 3 };
 
 // Session-only state (spec §4.4). paused: capture is off (/lessons pause).
 // pendingDetection: the detector call of the latest prompt, resolving to its queued item (or
-// null) once the item is in the queue. asking: a confirmation dialog is open, or waiting.
+// null) once the item is in the queue. asking: one of this mod's dialogs is open, or a turn-end
+// confirmation is waiting for its detection (see withAsk).
 let paused = false;
 let pendingDetection = null;
 let asking = false;
@@ -50,6 +53,7 @@ const PATH_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"
 // Store lists are read, changed and written one change at a time.
 let listChain = Promise.resolve();
 
+// Test hook: tests set the pause flag of their own module instance directly.
 export function setPaused(value) {
   paused = !!value;
 }
@@ -97,8 +101,12 @@ export function register(on, options) {
   });
 
   on("session.compact", async ($, e, next) => {
-    recalled = { sessionId: recalled.sessionId, ids: new Set() };
-    return next(e);
+    const out = await next(e);
+    // Only a compaction of the main conversation that went through drops what was attached.
+    if (!e.agentId && e.trigger !== "precompute" && !out?.skip) {
+      recalled = { sessionId: recalled.sessionId, ids: new Set() };
+    }
+    return out;
   });
 
   on("turn.complete", async ($, e, next) => {
@@ -143,7 +151,8 @@ export function register(on, options) {
 
 async function offerProjectSetupLater($) {
   try {
-    await offerProjectSetup($, { force: false });
+    // Another dialog of this mod is open: the setup question comes again at the next start.
+    if ((await offerProjectSetup($, { force: false })) === BUSY) debug($, "setup question deferred: a dialog is open");
   } catch (err) {
     debug($, `project setup failed: ${err?.message ?? err}`);
   }
@@ -151,6 +160,28 @@ async function offerProjectSetupLater($) {
 
 function debug($, text) {
   $.ui.log(`lessons-learned: ${text}`, { to: "debug" });
+}
+
+// One dialog of this mod at a time, across turn ends, /lessons and project setup: runs fn
+// holding the flag, or answers BUSY without running it when another holds it.
+async function withAsk(fn) {
+  if (asking) return BUSY;
+  asking = true;
+  try {
+    return await fn();
+  } finally {
+    asking = false;
+  }
+}
+
+// Asks with the mod's header; DISMISSED when the dialog is closed or nobody can answer.
+async function ask($, question, options, what) {
+  try {
+    return await $.ui.ask(question, { options, header: HEADER });
+  } catch (err) {
+    debug($, `${what} not answered: ${err?.message ?? err}`);
+    return DISMISSED;
+  }
 }
 
 // The text of a file, or null when it does not exist. Rejects when it cannot be read.
@@ -168,7 +199,8 @@ export async function context($) {
     USERPROFILE: await $.env.get("USERPROFILE"),
     HOME: await $.env.get("HOME"),
   });
-  const repoRoot = (await $.session.repo())?.root ?? null;
+  const repo = await $.session.repo();
+  const repoRoot = repo ? await workingTreeRoot($, repo.root) : null;
   let project = null;
   if (repoRoot) {
     const rootMd = joinPath(repoRoot, "CLAUDE.md");
@@ -184,6 +216,20 @@ export async function context($) {
     project = { claudeMd, importPath: pick.importPath, setUp };
   }
   return { today, configDir, repoRoot, project };
+}
+
+// The git root of the session's own working tree (spec §4.1): the nearest folder at or above
+// the working directory that holds `.git` (a folder, or a file in a worktree). session.repo()
+// names the main checkout even in a worktree, so it is only the fallback.
+async function workingTreeRoot($, mainRoot) {
+  try {
+    for (const dir of selfAndParents(await $.session.cwd())) {
+      if (await $.fs.exists(joinPath(dir, ".git"))) return dir;
+    }
+  } catch (err) {
+    debug($, `working tree root not found: ${err?.message ?? err}`);
+  }
+  return mainRoot;
 }
 
 export async function readScope($, scope) {
@@ -215,16 +261,18 @@ async function ensureFiles($, base) {
   if (!(await $.fs.exists(paths.rules))) await $.fs.write(paths.rules, FILE_HEADERS.rules + "\n");
 }
 
+// Skipped when nobody can answer (a -p run), as project setup is (spec §8).
 export async function ensureGlobal($) {
+  if ((await $.session.surfaces()).length === 0) return;
   const { configDir } = await context($);
   if (!configDir) return;
   await ensureFiles($, configDir);
   const claudeMd = joinPath(configDir, "CLAUDE.md");
   const text = await readText($, claudeMd);
   if (!hasBlock(text)) await $.fs.write(claudeMd, insertBlock(text, GLOBAL_IMPORT));
-  await $.store.set(KEY_GLOBAL_DONE, true);
 }
 
+// Resolves to BUSY, without asking, when another dialog of this mod is open.
 export async function offerProjectSetup($, { force }) {
   const { repoRoot, project } = await context($);
   if (!repoRoot || !project) return;
@@ -234,13 +282,8 @@ export async function offerProjectSetup($, { force }) {
     await ensureFiles($, repoRoot);
     return;
   }
-  let answer;
-  try {
-    answer = await $.ui.ask(SETUP_QUESTION, [YES_COMMIT, YES_IGNORE, NOT_HERE]);
-  } catch (err) {
-    debug($, `setup question not answered: ${err?.message ?? err}`);
-    return;
-  }
+  const answer = await withAsk(() => ask($, SETUP_QUESTION, [YES_COMMIT, YES_IGNORE, NOT_HERE], "setup question"));
+  if (answer === BUSY) return BUSY;
   if (answer === NOT_HERE) {
     await $.store.set(optOutKey(repoRoot), true);
     return;
@@ -270,6 +313,8 @@ function lastReply(messages) {
 // Reads what belongs to this submission, then starts the detector in the background:
 // the prompt never waits for the model (or for the lesson files the detector is shown).
 export async function startCapture($, e) {
+  // A skipped prompt leaves no older prompt's detection behind as this turn's.
+  pendingDetection = null;
   const prompt = String(e?.text ?? "");
   const base = { prompt, paused, originKind: e?.origin?.kind, hasPreviousReply: true, hasSurfaces: true };
   if (shouldSkip(base)) return;
@@ -316,10 +361,13 @@ async function detect($, { prompt, previousReply, key }) {
       { known, projectSetUp },
     );
     if (!detection) return null;
+    // A repeat of a P- entry belongs to this repo whatever scope the detector gave: offered
+    // in another repo it would act on that repo's unrelated P- entry.
+    const project = detection.scope === "project" || !!detection.repeatOf?.startsWith("P-");
     const item = {
       key,
-      detection,
-      repoRoot: detection.scope === "project" ? ctx.repoRoot : null,
+      detection: project ? { ...detection, scope: "project" } : detection,
+      repoRoot: project ? ctx.repoRoot : null,
       dismissed: 0,
       createdAt: ctx.today,
     };
@@ -409,11 +457,9 @@ async function confirmLater($) {
 }
 
 // Offers the oldest item this session can take, waiting up to 5 s for this turn's detection
-// (a later one stays queued for the next turn end). One dialog at a time.
+// (a later one stays queued for the next turn end). One dialog at a time (withAsk).
 export async function runConfirm($) {
-  if (asking) return;
-  asking = true;
-  try {
+  await withAsk(async () => {
     const pending = pendingDetection;
     pendingDetection = null;
     if (pending) await Promise.race([pending, $.clock.sleep(DETECTION_WAIT_MS)]);
@@ -422,33 +468,33 @@ export async function runConfirm($) {
     const ctx = await context($);
     const item = (await readList($, KEY_QUEUE)).find((i) => offerable(i, ctx.repoRoot));
     if (item) await confirmItem($, item, ctx, KEY_QUEUE);
-  } finally {
-    asking = false;
-  }
+  });
 }
 
 // Asks about one stored item and applies the answer. True when answered (the item leaves its
 // list); a dismissal counts against a queued item and leaves a review item where it is.
+// The caller holds the dialog flag.
 async function confirmItem($, queued, ctx, listKey) {
   const projectAvailable = !!ctx.project?.setUp;
   // The project is no longer set up: the lesson can only go to the global scope (spec §8).
-  const item = queued.detection.scope === "project" && !projectAvailable
+  const scoped = queued.detection.scope === "project" && !projectAvailable
     ? { ...queued, detection: { ...queued.detection, scope: "global" } }
     : queued;
-  const d = item.detection;
-  const target = d.repeatOf ? await lookUp($, d.repeatOf, d.repeatKind === "rule" ? "rules" : "lessons") : null;
+  const { target, kind } = await repeatTarget($, scoped.detection);
+  const item = kind === scoped.detection.repeatKind
+    ? scoped
+    : { ...scoped, detection: { ...scoped.detection, repeatKind: kind } };
   const dialog = dialogFor(item, { projectAvailable, target });
-  let answer;
-  try {
-    answer = await $.ui.ask(dialog.question, { options: dialog.options, header: dialog.header });
-  } catch (err) {
-    debug($, `confirmation not answered: ${err?.message ?? err}`);
+  const answer = await ask($, dialog.question, dialog.options, "confirmation");
+  if (answer === DISMISSED) {
     if (listKey === KEY_QUEUE) await dismiss($, queued);
     return false;
   }
   await updateList($, listKey, (list) => list.filter((i) => i.key !== queued.key));
-  await applyAction($, item, interpret(answer, item, dialog));
-  return true;
+  if (await applyAction($, item, interpret(answer, item, dialog))) return true;
+  // The cap dialog was dismissed: the correction goes back, its dismiss count unchanged.
+  await updateList($, listKey, (list) => [queued, ...list]);
+  return false;
 }
 
 // Dismissed once: offered again at the next turn end. Twice: moved to the review list.
@@ -464,28 +510,45 @@ async function dismiss($, item) {
 
 const scopeOfId = (id) => (id.startsWith("P-") ? "project" : "global");
 
-// The entry with this id in the lessons or rules file of its scope, read now; null if gone.
-async function lookUp($, id, which) {
+// The entry with this id as its scope's files are now, and the file holding it ("lessons" or
+// "rules"), looked for in `first` before the other one; null when it is gone. A detection is
+// a while old: its target may have been promoted or demoted since.
+async function locate($, id, first) {
   const s = await readScope($, scopeOfId(id));
-  return s ? findEntry(s[which], id) : null;
+  if (!s) return null;
+  for (const where of first === "rules" ? ["rules", "lessons"] : ["lessons", "rules"]) {
+    const entry = findEntry(s[where], id);
+    if (entry) return { entry, where };
+  }
+  return null;
 }
 
+// A repeat's target now, and its kind ("lesson" or "rule"), which the dialog follows.
+async function repeatTarget($, d) {
+  const found = d.repeatOf ? await locate($, d.repeatOf, d.repeatKind === "rule" ? "rules" : "lessons") : null;
+  if (!found) return { target: null, kind: d.repeatKind };
+  return { target: found.entry, kind: found.where === "rules" ? "rule" : "lesson" };
+}
+
+// Applies an answer. False only when a dialog it opened (the cap dialog) was dismissed:
+// nothing is written and the caller keeps the item.
 export async function applyAction($, item, action) {
   const d = item.detection;
-  if (action.type === "skip") return;
-  if (action.type === "promote") {
-    if (await lookUp($, action.id, "lessons")) await promote($, scopeOfId(action.id), action.id);
+  if (action.type === "skip") return true;
+  if (action.type === "promote" || action.type === "note") {
+    // Read now: a lesson promoted meanwhile is noted, never saved again as a new lesson.
+    const where = (await locate($, action.id, action.type === "note" ? "rules" : "lessons"))?.where;
+    if (action.type === "promote" && where === "lessons") {
+      return (await promote($, scopeOfId(action.id), action.id, { holdsAsk: true })) !== "dismissed";
+    }
+    if (where) await noteEntry($, action.id, where);
     else await saveLesson($, d.scope, d, d.body);
-    return;
-  }
-  if (action.type === "note") {
-    if (await lookUp($, action.id, "rules")) await noteRule($, action.id);
-    else await saveLesson($, d.scope, d, d.body);
-    return;
+    return true;
   }
   // save: text typed under Other replaces the body, cleaned like the detector's.
   const body = typeof action.body === "string" ? cleanBody(action.body) : d.body;
   if (body) await saveLesson($, action.scope, d, body);
+  return true;
 }
 
 async function saveLesson($, scope, d, body) {
@@ -500,13 +563,14 @@ async function saveLesson($, scope, d, body) {
     addEntry(f, { id: nextId(scope, [f, s.rules]), title: d.title, tags: d.tags, seen: 1, first: today, last: today, body }));
 }
 
-async function noteRule($, id) {
+// Seen +1 and last = today on the entry in `which` ("lessons" or "rules") of its scope.
+async function noteEntry($, id, which) {
   const s = await readScope($, scopeOfId(id));
   if (!s) return;
   const { today } = await context($);
-  await updateFile($, s.paths.rules, "rules", (f) => {
-    const rule = findEntry(f, id);
-    return rule ? replaceEntry(f, bumpSeen(rule, today)) : f;
+  await updateFile($, s.paths[which], which, (f) => {
+    const entry = findEntry(f, id);
+    return entry ? replaceEntry(f, bumpSeen(entry, today)) : f;
   });
 }
 
@@ -515,29 +579,28 @@ function upsert(file, entry) {
 }
 
 // Moves a lesson to the rules of its scope, seen +1. With the scope at ruleCap, asks which
-// rule goes back to lessons first; cancelled, dismissed or gone: false, nothing written.
-export async function promote($, scope, id) {
+// rule goes back to lessons first. Resolves to "promoted", or why nothing was written:
+// "missing", "cancelled", "dismissed", or "busy" (another dialog is open; only when the
+// caller does not already hold the dialog flag, holdsAsk).
+export async function promote($, scope, id, { holdsAsk = false } = {}) {
   let s = await readScope($, scope);
-  if (!s || !findEntry(s.lessons, id)) return false;
+  if (!s || !findEntry(s.lessons, id)) return "missing";
   const rules = entriesOf(s.rules);
   let demoteId = null;
   if (rules.length >= cfg.ruleCap) {
     const cap = capDialog(scope, rules);
-    let answer;
-    try {
-      answer = await $.ui.ask(cap.question, { options: cap.options, header: DIALOG_HEADER });
-    } catch (err) {
-      debug($, `promotion not confirmed: ${err?.message ?? err}`);
-      return false;
-    }
+    const askCap = () => ask($, cap.question, cap.options, "promotion");
+    const answer = holdsAsk ? await askCap() : await withAsk(askCap);
+    if (answer === BUSY) return "busy";
+    if (answer === DISMISSED) return "dismissed";
     demoteId = interpretCap(answer, rules, cap.candidates);
-    if (!demoteId) return false;
+    if (!demoteId) return "cancelled";
     // The dialog may have been open a while: continue from the files as they are now.
     s = await readScope($, scope);
-    if (!s) return false;
+    if (!s) return "missing";
   }
   const lesson = findEntry(s.lessons, id);
-  if (!lesson) return false;
+  if (!lesson) return "missing";
   const demoted = demoteId ? findEntry(s.rules, demoteId) : null;
   const { today } = await context($);
   const promoted = bumpSeen(lesson, today);
@@ -546,7 +609,7 @@ export async function promote($, scope, id) {
   await updateFile($, s.paths.rules, "rules", (f) => upsert(demoted ? removeEntry(f, demoted.id).file : f, promoted));
   await updateFile($, s.paths.lessons, "lessons", (f) => removeEntry(f, id).file);
   promotedThisSession.push(promoted);
-  return true;
+  return "promoted";
 }
 
 // ---------- /lessons (spec §5.6) ----------
@@ -588,7 +651,9 @@ async function listText($) {
     lessons.push(...l);
     counts.push(`${scope === "global" ? "Global" : "Project"}: ${plural(r.length, "rule")}, ${plural(l.length, "lesson")}`);
   }
-  const toReview = (await readList($, KEY_REVIEW)).length;
+  // Only what /lessons review would offer here.
+  const { repoRoot } = await context($);
+  const toReview = (await readList($, KEY_REVIEW)).filter((i) => offerable(i, repoRoot)).length;
   if (toReview > 0) counts.push(`${toReview} to review`);
   const lines = [counts.length > 0 ? counts.join(" · ") : "Nothing saved yet."];
   if (rules.length > 0) lines.push("", "Rules", ...rules.map(entryLine));
@@ -598,9 +663,7 @@ async function listText($) {
 
 // Walks the review list: one dialog per item, the same as at a turn end.
 async function reviewText($) {
-  if (asking) return "A lesson dialog is already open.";
-  asking = true;
-  try {
+  const text = await withAsk(async () => {
     const ctx = await context($);
     const items = (await readList($, KEY_REVIEW)).filter((i) => offerable(i, ctx.repoRoot));
     if (items.length === 0) return "Nothing to review.";
@@ -612,9 +675,8 @@ async function reviewText($) {
     }
     const left = items.length - answered;
     return `Reviewed ${plural(answered, "item")}${left > 0 ? `, ${left} left` : ""}.`;
-  } finally {
-    asking = false;
-  }
+  });
+  return text === BUSY ? ALREADY_OPEN : text;
 }
 
 // Detector eval (spec §9.5): every case through the real detector request, one after the other.
@@ -656,7 +718,7 @@ async function evalText($) {
 async function setupText($) {
   const { repoRoot } = await context($);
   if (!repoRoot) return "Not in a git repository.";
-  await offerProjectSetup($, { force: true });
+  if ((await offerProjectSetup($, { force: true })) === BUSY) return ALREADY_OPEN;
   return (await context($)).project?.setUp ? "Lessons are set up for this project." : "This project is not set up.";
 }
 
@@ -669,7 +731,9 @@ async function changeEntry($, verb, id) {
   const scope = scopeOfId(id);
   if (verb === "promote") {
     if (!lesson) return `${id} is already a rule.`;
-    return (await promote($, scope, id)) ? `Promoted ${id} to a rule.` : `${id} was not promoted.`;
+    const status = await promote($, scope, id);
+    if (status === "busy") return ALREADY_OPEN;
+    return status === "promoted" ? `Promoted ${id} to a rule.` : `${id} was not promoted.`;
   }
   if (verb === "demote") {
     if (!rule) return `${id} is already a lesson.`;
@@ -678,13 +742,8 @@ async function changeEntry($, verb, id) {
     return `Demoted ${id} to a lesson.`;
   }
   const entry = lesson ?? rule;
-  let answer;
-  try {
-    answer = await $.ui.ask(`Delete ${id} "${entry.title}"?`, { options: ["Delete", "Keep"], header: DIALOG_HEADER });
-  } catch (err) {
-    debug($, `delete not confirmed: ${err?.message ?? err}`);
-    return `Kept ${id}.`;
-  }
+  const answer = await withAsk(() => ask($, `Delete ${id} "${entry.title}"?`, ["Delete", "Keep"], "delete"));
+  if (answer === BUSY) return ALREADY_OPEN;
   if (answer !== "Delete") return `Kept ${id}.`;
   const [path, kind] = lesson ? [s.paths.lessons, "lessons"] : [s.paths.rules, "rules"];
   await updateFile($, path, kind, (f) => removeEntry(f, id).file);

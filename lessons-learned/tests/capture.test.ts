@@ -65,7 +65,9 @@ const queued = (key: string, o: Record<string, unknown> = {}, d: Record<string, 
   repoRoot: null, dismissed: 0, createdAt: "2026-10-01", ...o,
 });
 
-const NEW_QUESTION = `Lesson: "${TITLE}" (project). Save it?`;
+const NEW_QUESTION = `Lesson (project): "${TITLE}" — ${BODY} Save it?`;
+const GLOBAL_A1 = 'Lesson (global): "Lesson a:1" — Why it matters. Save it?';
+const GLOBAL_A2 = 'Lesson (global): "Lesson a:2" — Why it matters. Save it?';
 const debugOnly = (seen: any) => seen.logs.every((l: any) => l.to === "debug");
 
 // ---------- capture ----------
@@ -237,7 +239,7 @@ test("non-ASCII text is saved unchanged", async ($: any, on: any) => {
   const body = "Git Bash spremeni /ukaz v pot — čšž.";
   const seen = setUp(on, { model: [detected({ title, body, tags: ["šumniki", "ukazi"] })], asks: ["Save"] });
   await turn($, seen, "ne, uporabi PowerShell — čšž");
-  expect(seen.asks[0].question).toBe(`Lesson: "${title}" (project). Save it?`);
+  expect(seen.asks[0].question).toBe(`Lesson (project): "${title}" — ${body} Save it?`);
   const [saved] = entriesIn(seen, R.lessons);
   expect([saved.title, saved.body, saved.tags]).toEqual([title, body, ["šumniki", "ukazi"]]);
 });
@@ -245,7 +247,7 @@ test("non-ASCII text is saved unchanged", async ($: any, on: any) => {
 test("a global detection outside a repo offers no project option", async ($: any, on: any) => {
   const seen = setUp(on, { repo: null, model: [detected({ scope: "global" })], asks: ["Save"] });
   await turn($, seen);
-  expect(seen.asks[0]).toEqual({ question: `Lesson: "${TITLE}" (global). Save it?`, options: ["Save", "Skip"] });
+  expect(seen.asks[0]).toEqual({ question: `Lesson (global): "${TITLE}" — ${BODY} Save it?`, options: ["Save", "Skip"] });
   expect(entriesIn(seen, G.lessons).map((e: any) => e.id)).toEqual(["G-001"]);
 });
 
@@ -256,7 +258,7 @@ test("promotes a repeat", async ($: any, on: any) => {
   const seen = setUp(on, { files: filesWith({ pl: [lesson] }), model: [detected({ repeatOf: "P-004" })], asks: ["Promote to rule"] });
   await turn($, seen);
   expect(seen.asks).toEqual([{
-    question: 'Looks like a repeat of P-004 "Use PowerShell". Promote it to a rule?',
+    question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} Promote it to a rule?`,
     options: ["Promote to rule", "Save as new", "Skip"],
   }]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
@@ -267,9 +269,9 @@ test("promote records the rule in promotedThisSession", async ($: any, on: any) 
   const lesson = entry("P-004", "Use PowerShell");
   const seen = setUp(on, { files: filesWith({ pl: [lesson] }) });
   const before = promotedThisSession.length;
-  expect(await promote(seen.$, "project", "P-004")).toBe(true);
+  expect(await promote(seen.$, "project", "P-004")).toBe("promoted");
   expect(promotedThisSession.slice(before)).toEqual([{ ...lesson, seen: 2, last: TODAY }]);
-  expect(await promote(seen.$, "project", "P-099")).toBe(false);
+  expect(await promote(seen.$, "project", "P-099")).toBe("missing");
   expect(promotedThisSession.length).toBe(before + 1);
 });
 
@@ -288,6 +290,7 @@ test("cap dialog on promote: a picked rule goes back to lessons", async ($: any,
   });
   await turn($, seen);
   expect(seen.asks[1]).toEqual({ question: cap.question, options: cap.options });
+  expect(seen.headers).toEqual(["Lesson", "Lesson"]);
   const demoted = cap.candidates[1];
   const ruleIds = entriesIn(seen, R.rules).map((e: any) => e.id);
   expect(ruleIds).toHaveLength(20);
@@ -312,7 +315,7 @@ test("notes a broken rule", async ($: any, on: any) => {
   const seen = setUp(on, { files: filesWith({ pr: [rule] }), model: [detected({ repeatOf: "P-003" })], asks: ["Note it"] });
   await turn($, seen);
   expect(seen.asks).toEqual([{
-    question: 'Rule P-003 "Run tests before committing" was broken again. Note it?',
+    question: `Rule P-003 "Run tests before committing" was broken again — ${BODY} Note it?`,
     options: ["Note it", "Skip"],
   }]);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...rule, seen: 3, last: TODAY }]);
@@ -358,7 +361,7 @@ test("queue survives a session; a project item is not offered in another repo", 
   const global = queued("old:3");
   const seen = setUp(on, { store: { queue: [elsewhere, global] }, asks: ["Save"] });
   await turnEnd($, seen);
-  expect(seen.asks).toEqual([{ question: 'Lesson: "Lesson old:3" (global). Save it?', options: ["Save", "Save to project", "Skip"] }]);
+  expect(seen.asks).toEqual([{ question: 'Lesson (global): "Lesson old:3" — Why it matters. Save it?', options: ["Save", "Save to project", "Skip"] }]);
   expect(entriesIn(seen, G.lessons).map((e: any) => e.title)).toEqual(["Lesson old:3"]);
   expect(seen.store.get("queue")).toEqual([elsewhere]);
   await turnEnd($, seen);
@@ -401,11 +404,11 @@ for (const [name, reply] of [["rejects", { reject: true }], ["returns not json",
 test("one ask per turn end", async ($: any, on: any) => {
   const seen = setUp(on, { store: { queue: [queued("a:1"), queued("a:2")] }, asks: ["Skip", "Skip"] });
   await turnEnd($, seen);
-  expect(seen.asks.map((a: any) => a.question)).toEqual(['Lesson: "Lesson a:1" (global). Save it?']);
+  expect(seen.asks.map((a: any) => a.question)).toEqual([GLOBAL_A1]);
   await turnEnd($, seen);
   expect(seen.asks.map((a: any) => a.question)).toEqual([
-    'Lesson: "Lesson a:1" (global). Save it?',
-    'Lesson: "Lesson a:2" (global). Save it?',
+    GLOBAL_A1,
+    GLOBAL_A2,
   ]);
   expect(seen.store.get("queue")).toEqual([]);
 });
@@ -467,4 +470,110 @@ test("the queue item key is the session id and turn count", async ($: any, on: a
     dismissed: 0,
     createdAt: TODAY,
   }]);
+});
+
+// ---------- confirm: a repeat whose target moved, a project repeat, a dismissed cap dialog ----------
+
+const repeatOfP004 = (key: string, kind = "lesson") =>
+  queued(key, { repoRoot: REPO }, { title: TITLE, body: BODY, scope: "project", repeatOf: "P-004", repeatKind: kind });
+
+test("two queued repeats of one lesson: the second notes the rule the first promoted", async ($: any, on: any) => {
+  const lesson = entry("P-004", "Use PowerShell");
+  const seen = setUp(on, {
+    files: filesWith({ pl: [lesson] }),
+    store: { queue: [repeatOfP004("a:1"), repeatOfP004("a:2")] },
+    asks: ["Promote to rule", "Note it"],
+  });
+  await turnEnd($, seen);
+  await turnEnd($, seen);
+  expect(seen.asks).toEqual([
+    { question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} Promote it to a rule?`, options: ["Promote to rule", "Save as new", "Skip"] },
+    { question: `Rule P-004 "Use PowerShell" was broken again — ${BODY} Note it?`, options: ["Note it", "Skip"] },
+  ]);
+  expect(entriesIn(seen, R.lessons)).toEqual([]);
+  expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
+  expect(seen.store.get("queue")).toEqual([]);
+});
+
+test("a repeat promoted elsewhere while its dialog is open is noted on the rule, not saved again", async ($: any, on: any) => {
+  const lesson = entry("P-004", "Use PowerShell");
+  const seen = setUp(on, {
+    files: filesWith({ pl: [lesson] }),
+    store: { queue: [repeatOfP004("a:1")] },
+    asks: [{ answer: "Promote to rule", delay: 10 }],
+  });
+  await turnEnd($, seen);
+  // Another session promotes P-004 while the dialog is open.
+  seen.files.set(R.lessons, fileOf("lessons"));
+  seen.files.set(R.rules, fileOf("rules", [{ ...lesson, seen: 2, last: TODAY }]));
+  await seen.clock.advance(10);
+  expect(entriesIn(seen, R.lessons)).toEqual([]);
+  expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
+});
+
+test("a repeat of a rule that was demoted is asked as a repeat of the lesson", async ($: any, on: any) => {
+  const lesson = entry("P-004", "Use PowerShell", { seen: 2 });
+  const seen = setUp(on, { files: filesWith({ pl: [lesson] }), store: { queue: [repeatOfP004("a:1", "rule")] }, asks: ["Promote to rule"] });
+  await turnEnd($, seen);
+  expect(seen.asks[0].question).toBe(`Looks like a repeat of P-004 "Use PowerShell" — ${BODY} Promote it to a rule?`);
+  expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
+  expect(entriesIn(seen, R.lessons)).toEqual([]);
+});
+
+test("a rule demoted while its Note it dialog is open is noted on the lesson", async ($: any, on: any) => {
+  const rule = entry("P-004", "Use PowerShell", { seen: 2 });
+  const seen = setUp(on, { files: filesWith({ pr: [rule] }), store: { queue: [repeatOfP004("a:1", "rule")] }, asks: [{ answer: "Note it", delay: 10 }] });
+  await turnEnd($, seen);
+  seen.files.set(R.rules, fileOf("rules"));
+  seen.files.set(R.lessons, fileOf("lessons", [rule]));
+  await seen.clock.advance(10);
+  expect(entriesIn(seen, R.lessons)).toEqual([{ ...rule, seen: 3, last: TODAY }]);
+  expect(entriesIn(seen, R.rules)).toEqual([]);
+});
+
+test("a repeat of a P- entry stays with its repo whatever scope the detector gave", async ($: any, on: any) => {
+  const seen = setUp(on, { files: filesWith({ pl: [entry("P-004", "Use PowerShell")] }), model: [detected({ scope: "global", repeatOf: "P-004" })] });
+  await submit($);
+  await seen.clock.settle();
+  const [item] = seen.store.get("queue") as any[];
+  expect(item).toMatchObject({ repoRoot: REPO, detection: { scope: "project", repeatOf: "P-004", repeatKind: "lesson" } });
+});
+
+test("a P- repeat queued in another repo is not offered here", async ($: any, on: any) => {
+  const other = queued("old:1", { repoRoot: "C:\\other" }, { scope: "global", repeatOf: "P-004", repeatKind: "lesson" });
+  const seen = setUp(on, { files: filesWith({ pl: [entry("P-004", "Unrelated here")] }), store: { queue: [other] }, asks: ["Promote to rule"] });
+  await turnEnd($, seen);
+  expect(seen.asks).toEqual([]);
+  expect(seen.writes).toEqual([]);
+  expect(seen.store.get("queue")).toEqual([other]);
+});
+
+test("a dismissed cap dialog puts the correction back in the queue", async ($: any, on: any) => {
+  const files = filesWith({ pl: [entry("P-004", "Use PowerShell")], pr: twentyRules() });
+  const seen = setUp(on, { files, model: [detected({ repeatOf: "P-004" })], asks: ["Promote to rule", { reject: true }, "Skip"] });
+  await turn($, seen);
+  expect(seen.asks).toHaveLength(2);
+  expect(seen.writes).toEqual([]);
+  const queue = seen.store.get("queue") as any[];
+  expect(queue.map((i) => [i.key, i.dismissed])).toEqual([["s1:1", 0]]);
+  await turnEnd($, seen);
+  expect(seen.asks).toHaveLength(3);
+  expect(seen.asks[2].question).toBe(seen.asks[0].question);
+  expect(seen.store.get("queue")).toEqual([]);
+});
+
+test("a skipped prompt does not wait on an older prompt's detection", async ($: any, on: any) => {
+  const seen = setUp(on, { model: [{ text: detected(), delay: 3000 }], asks: ["Save"] });
+  await submit($);
+  await seen.clock.settle();
+  await turnEnd($, seen, "aborted");
+  await submit($, "/help");
+  await seen.clock.settle();
+  await turnEnd($, seen);
+  await seen.clock.advance(3000);
+  // The detection lands in the queue and waits for the next turn end.
+  expect(seen.asks).toEqual([]);
+  expect(seen.store.get("queue")).toHaveLength(1);
+  await turnEnd($, seen);
+  expect(seen.asks).toHaveLength(1);
 });

@@ -137,7 +137,7 @@ test("review asks once per item and removes the answered", async ($: any, on: an
     asks: ["Save", "Skip"],
   });
   expect(await run($, "review")).toBe("Reviewed 2 items.");
-  expect(seen.asks.map((a) => a.question)).toEqual(['Lesson: "First" (global). Save it?', 'Lesson: "Second" (global). Save it?']);
+  expect(seen.asks.map((a) => a.question)).toEqual(['Lesson (global): "First" — Body. Save it?', 'Lesson (global): "Second" — Body. Save it?']);
   expect(seen.store.get("review")).toEqual([]);
   expect(ids(seen, G.lessons)).toEqual(["G-001"]);
 });
@@ -194,4 +194,68 @@ test("pause stops capture while recall still runs; resume restores it", async ($
   await submit("no, use something else");
   await seen.clock.settle();
   expect(seen.modelCalls).toHaveLength(1);
+});
+
+test("/lessons counts only the review items this repo can take", async ($: any, on: any) => {
+  setUp(on, {
+    store: { review: [reviewItem("k1", "Global"), reviewItem("k2", "Elsewhere", { scope: "project" }), { ...reviewItem("k3", "Here", { scope: "project" }), repoRoot: REPO }] },
+  });
+  const first = (await run($)).split("\n")[0];
+  expect(first).toBe("Global: 0 rules, 0 lessons · Project: 0 rules, 0 lessons · 2 to review");
+});
+
+// ---------- one dialog at a time: turn-end confirmations, /lessons and project setup ----------
+
+const queuedGlobal = { key: "a:1", dismissed: 0, createdAt: "2026-10-08", repoRoot: null, detection: { title: "Queued", body: "Body.", tags: ["alpha", "beta"], scope: "global", repeatOf: null, repeatKind: null } };
+const turnEnd = async ($: any, seen: any) => {
+  await $.turn.complete({ answer: "Done.", reason: "answer", durationMs: 1, isAborted: false, turnId: "t" });
+  await seen.clock.advance(0);
+};
+const GLOBAL_ONLY = { [G.lessons]: fileOf("lessons", [entry("G-002", "Quote it")]), [G.rules]: fileOf("rules"), [G.md]: insertBlock(null, "rules-learned.md") };
+
+test("while a turn-end dialog is open, /lessons delete, promote at the cap and setup do not ask", { options: { ruleCap: 1 } } as any, async ($: any, on: any) => {
+  const seen = setUp(on, {
+    files: { ...GLOBAL_ONLY, [G.rules]: fileOf("rules", [entry("G-001", "Old rule")]) },
+    store: { queue: [queuedGlobal] },
+    asks: [{ answer: "Skip", delay: 1000 }],
+  });
+  await turnEnd($, seen);
+  expect(seen.asks).toHaveLength(1);
+  expect(await run($, "delete G-002")).toBe("A lesson dialog is already open.");
+  expect(await run($, "promote G-002")).toBe("A lesson dialog is already open.");
+  expect(await run($, "setup")).toBe("A lesson dialog is already open.");
+  expect(seen.asks).toHaveLength(1);
+  expect(seen.writes).toEqual([]);
+  await seen.clock.advance(1000);
+  expect(seen.store.get("queue")).toEqual([]);
+});
+
+test("a turn end while a /lessons dialog is open asks nothing and keeps the queue", async ($: any, on: any) => {
+  const seen = setUp(on, { files: GLOBAL_ONLY, store: { queue: [queuedGlobal] }, asks: [{ answer: "Keep", delay: 1000 }, "Skip"] });
+  const deleting = run($, "delete G-002");
+  await seen.clock.advance(0);
+  await turnEnd($, seen);
+  expect(seen.asks).toHaveLength(1);
+  await seen.clock.advance(1000);
+  expect(await deleting).toBe("Kept G-002.");
+  expect(seen.store.get("queue")).toEqual([queuedGlobal]);
+  await turnEnd($, seen);
+  expect(seen.asks).toHaveLength(2);
+  expect(seen.store.get("queue")).toEqual([]);
+});
+
+test("the project setup ask is skipped while a lesson dialog is open", async ($: any, on: any) => {
+  const seen = setUp(on, { files: GLOBAL_ONLY, store: { queue: [queuedGlobal] }, asks: [{ answer: "Skip", delay: 1000 }, "Not here"] });
+  await turnEnd($, seen);
+  await $.session.start({ cwd: REPO } as any);
+  await seen.clock.advance(0);
+  expect(seen.asks).toHaveLength(1);
+  await seen.clock.advance(1000);
+  expect(seen.asks).toHaveLength(1);
+  expect(seen.store.has(`optOut:${REPO}`)).toBe(false);
+  // Offered again at the next start.
+  await $.session.start({ cwd: REPO } as any);
+  await seen.clock.advance(0);
+  expect(seen.asks).toHaveLength(2);
+  expect(seen.store.get(`optOut:${REPO}`)).toBe(true);
 });
