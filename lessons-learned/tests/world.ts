@@ -23,6 +23,7 @@ import { mock } from "claude-code/testing";
 //   now        number              the mocked clock's start, ms (default 2026-10-09 12:00 UTC)
 //   writeFails boolean | (path) => boolean   $.fs.write rejects (for matching paths)
 //   readFails  boolean | (path) => boolean   $.fs.read rejects (for matching paths)
+//   allowTools string[]            tool names whose tool.call is answered with an empty result
 //   (any tool.call other than AskUserQuestion throws: unexpected calls fail loudly;
 //   prompt.submit and turn.complete pass through: the prompt enters, the answer is shown)
 //
@@ -62,6 +63,7 @@ export type WorldOptions = {
   now?: number;
   writeFails?: Matcher;
   readFails?: Matcher;
+  allowTools?: string[];
 };
 
 const matches = (m: Matcher | undefined, path: string) => (typeof m === "function" ? m(path) : !!m);
@@ -151,6 +153,7 @@ export function world(on: any, opts: WorldOptions = {}) {
   on("ui.log", (_$: any, e: any) => ({ value: log(e.text, e.to) }));
   // $.ui.ask is a tool.call of AskUserQuestion.
   on("tool.call", async (_$: any, e: any) => {
+    if (opts.allowTools?.includes(e.tool)) return { result: "", text: "" };
     if (e.tool !== "AskUserQuestion") throw new Error(`unexpected tool call: ${e.tool}`);
     const q = e.questions[0];
     const answer = await ask(q.question, q.options.map((o: any) => o.label));

@@ -12,6 +12,7 @@ import {
 import { hasBlock, insertBlock, addIgnoreLines, pickClaudeMd } from "./lib/claude-md.mjs";
 import { joinPath, configDirFrom, scopeFiles } from "./lib/paths.mjs";
 import { DETECTOR_SYSTEM, shouldSkip, buildDetectorPrompt, parseDetectorReply } from "./lib/detector.mjs";
+import { matchLessons, formatBlock, RECALL_LEAD, RULES_LEAD, rememberPath } from "./lib/recall.mjs";
 import { dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "./lib/confirm.mjs";
 
 export const KEY_GLOBAL_DONE = "globalSetupDone";
@@ -40,6 +41,11 @@ let paused = false;
 let pendingDetection = null;
 let asking = false;
 export let promotedThisSession = [];
+// Recall state: file paths the session touched lately, and the lessons already attached.
+let recentPaths = [];
+let recalled = { sessionId: "", ids: new Set() };
+
+const PATH_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob"]);
 
 // Store lists are read, changed and written one change at a time.
 let listChain = Promise.resolve();
@@ -57,6 +63,8 @@ export function register(on, options) {
   pendingDetection = null;
   asking = false;
   promotedThisSession = [];
+  recentPaths = [];
+  recalled = { sessionId: "", ids: new Set() };
   listChain = Promise.resolve();
 
   on("prompt.submit", async ($, e, next) => {
@@ -65,10 +73,31 @@ export function register(on, options) {
     } catch (err) {
       debug($, `capture failed: ${err?.message ?? err}`);
     }
-    return next(e);
+    // Recall adds no wait beyond the file reads; a failure sends the prompt on without blocks.
+    let blocks = [];
+    try {
+      blocks = await recallContext($, e);
+    } catch (err) {
+      debug($, `recall failed: ${err?.message ?? err}`);
+    }
+    return next(blocks.length === 0 ? e : { ...e, context: [...(e.context ?? []), ...blocks] });
   }).catch(($, e, next) => {
     // The hook threw or overran its time: the prompt still enters, untouched.
     debug($, `prompt hook failed (${next.error?.kind}): ${next.error?.message ?? ""}`);
+    return next(e);
+  });
+
+  on("tool.call", async ($, e, next) => {
+    try {
+      trackPath(e);
+    } catch (err) {
+      debug($, `path tracking failed: ${err?.message ?? err}`);
+    }
+    return next(e);
+  });
+
+  on("session.compact", async ($, e, next) => {
+    recalled = { sessionId: recalled.sessionId, ids: new Set() };
     return next(e);
   });
 
@@ -285,6 +314,38 @@ function withUniqueKey(item, queue) {
   let key = item.key;
   for (let n = 2; queue.some((i) => i.key === key); n++) key = `${item.key}:${n}`;
   return key === item.key ? item : { ...item, key };
+}
+
+// ---------- recall (spec §5.4) ----------
+
+// Remembers the path a file tool is about to touch; never alters the call.
+function trackPath(e) {
+  if (!PATH_TOOLS.has(e?.tool)) return;
+  for (const key of ["file_path", "path", "notebook_path"]) {
+    if (typeof e[key] === "string" && e[key] !== "") recentPaths = rememberPath(recentPaths, e[key]);
+  }
+}
+
+// The context blocks for this prompt: rules promoted since the last prompt, then the
+// lessons whose tags match the prompt and the recent paths (each lesson once per session).
+export async function recallContext($, e) {
+  const sessionId = String(await $.session.id());
+  if (recalled.sessionId !== sessionId) recalled = { sessionId, ids: new Set() };
+  const blocks = [];
+  if (promotedThisSession.length > 0) {
+    blocks.push(formatBlock(RULES_LEAD, promotedThisSession));
+    promotedThisSession = [];
+  }
+  const lessons = [];
+  for (const scope of ["global", "project"]) {
+    const s = await readScope($, scope);
+    if (s) lessons.push(...entriesOf(s.lessons));
+  }
+  const haystack = [String(e?.text ?? ""), ...recentPaths].join(" ");
+  const matched = matchLessons(lessons, haystack, { max: cfg.maxRecall, exclude: recalled.ids });
+  for (const l of matched) recalled.ids.add(l.id);
+  if (matched.length > 0) blocks.push(formatBlock(RECALL_LEAD, matched));
+  return blocks;
 }
 
 // ---------- queue and review lists in $.store (spec §4.4) ----------
