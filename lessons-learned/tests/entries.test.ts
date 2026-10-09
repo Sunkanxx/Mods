@@ -234,3 +234,25 @@ test("no @ that could start an import survives cleaning, whatever the backticks"
   expect(cleanBody("mail me@x.com")).toBe("mail me@x.com");
   expect(cleanBody("see @a/b.md now")).toBe(`see ${FULLWIDTH_AT}a/b.md now`);
 });
+
+// The scanner's ^ also matches at the start of every markdown text token: after emphasis,
+// strikethrough, link brackets, an HTML tag or an escape (a live probe imported
+// "**@strong.md**", "*@em.md*" and "[@link.md](u)").
+const BARE_AT = /(?<![\p{L}\p{N}._+-])@/u;
+const DELIMITED = ["**@x.md**", "*@x.md*", "_@x.md_", "~~@x~~", "[@x.md](u)", "(@x)", '"@x"', "<@x>"];
+// Stricter than "a letter, digit or ._+- before it": "_" before "@" can still open or close
+// emphasis, and an escaped "\." is a token of its own, so each would leave "@" starting a token.
+const TOKEN_START = ["_a_@x.md", "**_@x.md_**", "a._@x.md_", "\\.@x.md", "\\-@x.md"];
+const EMAILS = ["me@x.com", "a.b@x.org", "me+tag@x.com", "first_last@x.com", "a-b@x.org", "žan@x.si"];
+
+test("no @ starts a markdown text token after cleaning; emails stay", () => {
+  for (const clean of [cleanTitle, cleanBody]) {
+    for (const s of DELIMITED) {
+      expect(clean(s)).not.toMatch(BARE_AT);
+      expect(clean(clean(s))).toBe(clean(s));
+    }
+    for (const s of TOKEN_START) expect(clean(s)).not.toContain("@");
+    for (const s of EMAILS) expect(clean(`mail ${s} now`)).toBe(`mail ${s} now`);
+  }
+  expect(cleanBody("**@x.md**")).toBe(`**${FULLWIDTH_AT}x.md**`);
+});

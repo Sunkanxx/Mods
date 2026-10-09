@@ -126,17 +126,21 @@ function truncate(s, max) {
   return chars.length <= max ? s : chars.slice(0, max - 1).join("") + "…";
 }
 
-// Claude Code reads "@path" as an import wherever it starts the text or follows whitespace
-// outside a code span, and a code span is closed only by a backtick run of the same length
-// (an escaped "\`" is no backtick at all): wrapping in backticks cannot be made safe. So every
-// "@" at the start or after whitespace, a backtick or a backslash becomes U+FF20 (fullwidth
-// commercial at), which still reads as "@" but starts no import. An "@" inside a word
-// (me@x.com) stays. Idempotent: the replacement is not "@" (spec §5.5).
-const IMPORT_AT = /(^|[\s`\\])@/g;
+// Claude Code reads "@path" as an import where it follows whitespace or starts a markdown text
+// token outside a code span: the start of the text, but also right after emphasis (* _),
+// strikethrough (~), a link bracket, an HTML tag, a code span or an escape ("\."). Code spans
+// close only on a backtick run of the same length, so wrapping in backticks cannot be made
+// safe. So every "@" becomes U+FF20 (fullwidth commercial at), which still reads as "@" but
+// starts no import, unless it sits inside a word: right after a letter, digit or mark, or
+// after ".", "+" or "-" that itself follows one (me@x.com, a.b@x.org, me+tag@x.com). "_" right
+// before "@" does not count: it can open or close emphasis. Idempotent: the replacement is not
+// "@" (spec §5.5).
+const WORD = String.raw`[\p{L}\p{M}\p{N}]`;
+const IMPORT_AT = new RegExp(String.raw`(?<!${WORD}|${WORD}[.+\-])@`, "gu");
 const SAFE_AT = String.fromCodePoint(0xff20);
 
 function defuseAt(s) {
-  return s.replace(IMPORT_AT, `$1${SAFE_AT}`);
+  return s.replace(IMPORT_AT, SAFE_AT);
 }
 
 function clean(s, max) {

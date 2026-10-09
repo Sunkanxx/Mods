@@ -260,11 +260,15 @@ Pure functions over file text, plus one writer.
   writing at once share a race window of milliseconds.)
 - **Clean** every title and body before writing: newlines become spaces, leading markdown
   heading marks and the `lessons-learned:start/end` markers are stripped, title ≤ 80 and body
-  ≤ 400 characters. Every `@` at the start of the text or after whitespace, a backtick or a
-  backslash becomes `＠` (U+FF20, fullwidth commercial at), whatever backticks surround it, so no
-  entry can start an import; an `@` inside a word (`me@x.com`) stays. It still reads as `@` to
-  people and to Claude, and cleaning twice changes nothing. Backticks are left as written: the
-  defence does not depend on code spans (§11.3).
+  ≤ 400 characters. Every `@` becomes `＠` (U+FF20, fullwidth commercial at), whatever
+  backticks or markdown surround it, unless it sits inside a word: right after a letter, digit
+  or combining mark, or after `.`, `+` or `-` that itself follows one (`me@x.com`, `a.b@x.org`,
+  `me+tag@x.com` stay). The import scanner matches at the start of every markdown text token —
+  after emphasis, strikethrough, a link bracket, an HTML tag, a code span or an escape — so
+  `**@x.md**`, `[@x.md](u)` or `\.@x.md` are defused too; `_` right before `@` does not count as
+  inside a word, since it can open or close emphasis. `＠` still reads as `@` to people and to
+  Claude, and cleaning twice changes nothing. Backticks are left as written: the defence does
+  not depend on code spans (§11.3).
 - **Clean tags:** lowercase, trimmed, whitespace collapsed (and NFC); a tag is kept only if it
   matches `^[\p{L}\p{N}][\p{L}\p{M}\p{N} -]{0,29}$` (a letter or digit in any script first,
   then also combining marks, spaces and hyphens; ≤ 30 characters) and has at most 3 words; anything else is dropped, not repaired.
@@ -393,6 +397,10 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
    span (``Use ``` @evil.md ` for builds`` and ``Note \` @evil.md \` here`` came back unchanged,
    leaving `@evil.md` as plain text to the import scanner). Cleaning no longer relies on code
    spans: every `@` that could start an import becomes `＠` (U+FF20) instead (§5.5).
+   **Widened after a live probe (2026-10-09):** with `claude -p` and a scratch `CLAUDE.md`, the
+   scanner's `^` also matched at the start of each markdown text token — `**@strong.md**`,
+   `*@em.md*` and `[@link.md](u)` were imported — so "after whitespace or a backtick" was not
+   enough. Now every `@` not inside a word is defused (§5.5).
 
 4. **Detector eval (2026-10-09):** `Detected: 15/15 · False positives: 0/15` with model `haiku`, after 0 tuning
    rounds (`DETECTOR_SYSTEM` unchanged). Measured with a throwaway harness plugin that reuses the library code
