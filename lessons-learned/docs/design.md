@@ -301,7 +301,7 @@ points to "keep out of git".
 1. **store (unit):** parse/serialise round trip; malformed blocks kept verbatim; id allocation
    across both files; promote/demote moves; cap + demotion choice; cleaning (`@` lines,
    headings, markers, length); block insert idempotent for `CLAUDE.md`, `.claude/CLAUDE.md` and
-   a new file; temp-file + rename write.
+   a new file; re-read before every write.
 2. **capture (unit):** prompt building incl. truncation at ~6,000 characters; reply parsing
    (valid, invalid JSON, code fences, unknown `repeatOf`, bad scope, generic tags); every skip
    condition.
@@ -311,7 +311,7 @@ points to "keep out of git".
    here / no surfaces); a correction from submit to save, incl. Other text, promotion, cap
    dialog, rule broken again; dismiss → offered again → review list; model failure leaves no
    trace.
-5. **Detector eval (`npm run eval`, outside the suite):** ~30 labelled pairs (previous reply,
+5. **Detector eval (`/lessons eval`, outside the suite; runs through the user's own Claude Code credentials):** ~30 labelled pairs (previous reply,
    user message) split between corrections and look-alikes ("use the other file", "B",
    "actually make it blue"), run against the real model. Target: zero false positives on the
    look-alikes; a few cents per run.
