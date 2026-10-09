@@ -1,6 +1,6 @@
 # lessons-learned — design
 
-Status: approved design, not yet built (2026-10-09).
+Status: built, version 0.1.0 (2026-10-09).
 Repo: `github.com/Sunkanxx/Mods` (marketplace `sunkanxx-mods`), plugin folder `lessons-learned/`.
 
 ## 1. Purpose
@@ -21,8 +21,8 @@ Non-goals: refusing tool calls that break a rule (enforcement); importing existi
 
 ## 2. Constraints
 
-- **Standalone and public.** Depends only on Claude Code's mod API (minimum version declared in
-  the plugin manifest). No other plugin, skill, agent or tool is assumed to exist.
+- **Standalone and public.** Depends only on Claude Code's mod API (the README states the Claude
+  Code version it was tested with). No other plugin, skill, agent or tool is assumed to exist.
 - Works on Windows, macOS and Linux; paths come from the API, never hard-coded.
 - Adds no wait to a prompt: the only model call runs in the background.
 - Degrades silently: a failed model call, a missing model or a `-p` run means "no capture",
@@ -36,11 +36,12 @@ Mods/                                   github.com/Sunkanxx/Mods (marketplace "s
 ├─ .claude-plugin/marketplace.json      lists every public mod in this repo
 ├─ README.md                            what is here; `claude plugin marketplace add Sunkanxx/Mods`
 └─ lessons-learned/
-   ├─ .claude-plugin/plugin.json        manifest, userConfig, minimum Claude Code version
+   ├─ .claude-plugin/plugin.json        manifest, userConfig
    ├─ hooks/hooks.json                  one `modules` entry
-   ├─ hooks/*.mjs                       setup, capture, confirm, recall, store, commands
+   ├─ hooks/lessons-learned.mjs         every hook and host call: setup, capture, confirm, recall, commands
+   ├─ hooks/lib/*.mjs                   pure libraries (entries, CLAUDE.md block, paths, detector, recall, confirm)
    ├─ tests/                            unit + hook tests
-   ├─ eval/                             detector eval set + runner (not part of the test suite)
+   ├─ eval/cases.json                   detector eval set, run by `/lessons eval` (not part of the test suite)
    ├─ docs/design.md                    this file
    ├─ README.md
    └─ LICENSE                           MIT
@@ -61,7 +62,9 @@ claude plugin install lessons-learned@sunkanxx-mods
 | Global  | `~/.claude/lessons-learned.md`  | `~/.claude/rules-learned.md`  | `~/.claude/CLAUDE.md` |
 | Project | `<repo>/lessons-learned.md`     | `<repo>/rules-learned.md`     | `<repo>/CLAUDE.md`, or `<repo>/.claude/CLAUDE.md` if that is the one that exists |
 
-`<repo>` is the git root of the session's working directory. Project files sit next to
+`<repo>` is the git root of the session's working directory: the nearest folder at or above it
+that holds `.git`, so a worktree session uses the worktree's own root, not the main checkout's
+(`$.session.repo()` names the main checkout and is only the fallback). Project files sit next to
 `CLAUDE.md` and are **committed by default**; setup offers "keep them out of git" instead
 (adds both to `.gitignore`), for team repos where `@rules-learned.md` would reach teammates.
 When `CLAUDE.md` lives in `.claude/`, the import is written as a path relative to that file.
@@ -102,9 +105,9 @@ Git Bash rewrites `/cmd` into a path, so run slash commands in `claude -p` from 
 ### 4.4 Mod-private state (`$.store`, kept between sessions)
 
 - `optOut:<repo root>`: the user answered "Not here" to project setup.
-- `globalSetupDone`: global files and block created.
 - `queue`: detected corrections not yet answered (with their dismiss count), so closing a
-  session before the dialog loses nothing; offered at the next turn end in any session.
+  session before the dialog loses nothing; offered at the next turn end in any session (an item
+  tied to a repo only in a session of that repo).
 - `review`: items dismissed twice, waiting for `/lessons review`.
 
 Session-only (memory): ids already recalled this session, recently touched paths, capture
@@ -120,7 +123,7 @@ paused flag.
 | tracker  | `tool.call`     | record paths of Read / Edit / Write / Grep / Glob calls (last ~20) |
 | confirm  | `turn.complete` | show the confirmation dialog for the next queued item |
 | store    | (library)       | pure parse / serialise / move / clean / write functions |
-| commands | `/lessons`      | list, review, promote, demote, delete, setup, pause, resume |
+| commands | `/lessons`      | list, review, promote, demote, delete, setup, pause, resume, eval |
 
 ### 5.1 setup
 
@@ -131,7 +134,8 @@ paused flag.
   project? It adds two files next to CLAUDE.md and one import line."* with
   `Yes, commit them` · `Yes, keep out of git` · `Not here`. "Not here" is stored per repo root;
   `/lessons setup` asks again.
-- Skipped when nobody can answer (`$.session.surfaces()` is empty).
+- Skipped when nobody can answer (`$.session.surfaces()` is empty): global and project setup alike.
+- The project question waits for the next session start when another dialog of this mod is open.
 
 ### 5.2 capture
 
@@ -183,19 +187,28 @@ once it is a rule).
 At `turn.complete`, when the queue is not empty and the result of this turn's capture has
 arrived (waiting at most 5 seconds for it; a later result is queued for the next turn end),
 show the oldest item with `$.ui.ask`. A queued project-scope item is only offered in a
-session of that repo.
+session of that repo; so is a repeat of a `P-` entry, whatever scope the detector gave (it is
+stored as project scope), since another repo's `P-` id names an unrelated entry.
 "Other" (always present in the dialog) is the edit field: typed text replaces the body, keeps
 the detector's tags and scope, and goes through the same cleaning.
 
 | Detector result | Question | Options |
 |---|---|---|
-| new lesson | *Lesson: "<title>" (<scope>). Save it?* | `Save` · `Save as global` / `Save to project` (the other scope; omitted if the project is not set up) · `Skip` · Other |
-| `repeatOf` → a lesson | *Looks like a repeat of <id> "<title>". Promote it to a rule?* | `Promote to rule` · `Save as new` · `Skip` · Other |
-| `repeatOf` → a rule | *Rule <id> "<title>" was broken again. Note it?* | `Note it` · `Skip` · Other (saved as a new lesson) |
+| new lesson | *Lesson (<scope>): "<title>" — <body> Save it?* | `Save` · `Save as global` / `Save to project` (the other scope; omitted if the project is not set up) · `Skip` · Other |
+| `repeatOf` → a lesson | *Looks like a repeat of <id> "<target's title>" — <body> Promote it to a rule?* | `Promote to rule` · `Save as new` · `Skip` · Other |
+| `repeatOf` → a rule | *Rule <id> "<target's title>" was broken again — <body> Note it?* | `Note it` · `Skip` · Other (saved as a new lesson) |
+
+Every question shows the detected body, the text `Save` or `Save as new` would write (§7). A
+repeat names its target by the title it has now. The target is looked up when the dialog opens:
+a lesson promoted since the detection (for example by an earlier repeat in the queue) is asked
+about as a rule, and a demoted rule as a lesson. When the answer comes, a `Promote` of an entry
+that is a rule by then notes it instead, and a `Note it` on an entry that is a lesson by then
+counts it on the lesson; neither saves a duplicate.
 
 - **Promote:** `seen` +1, `last` = today, entry moves from `lessons-learned.md` to
   `rules-learned.md` of its scope. If that scope already has `ruleCap` rules, a second dialog
-  asks which rule to demote back to lessons (or to cancel the promotion).
+  asks which rule to demote back to lessons (or to cancel the promotion). Dismissing that second
+  dialog puts the correction back where it was, its dismiss count unchanged.
 - **Note it:** `seen` +1 and `last` = today on the rule. A high `seen` on a rule shows which rules
   are not working.
 - **Dismissed** (the ask rejects): the item stays queued and is offered again at the next turn
@@ -203,6 +216,10 @@ the detector's tags and scope, and goes through the same cleaning.
 - Asks happen only at `turn.complete`, one at a time. Whether two plugins' simultaneous asks
   queue, replace or reject is undocumented; the dismissal handling above makes all three
   outcomes safe (see §9).
+- One dialog of this mod at a time, across turn ends, `/lessons` (review, delete, the cap dialog
+  of `promote`) and project setup: while one is open, a turn end asks nothing (the queue waits),
+  a `/lessons` command that needs a dialog answers "A lesson dialog is already open.", and the
+  project setup question waits for the next session start.
 
 ### 5.4 recall
 
@@ -214,8 +231,9 @@ Runs at `prompt.submit`, passing blocks down through `next({ ...e, context })`.
 - **A lesson matches** when at least 2 of its tags hit, or 1 multi-word tag hits.
 - **At most 3** lessons per prompt (`maxRecall`), ranked by tags matched, then `last`. Each is
   capped at ~400 characters.
-- **No repeats:** a lesson attached once is not attached again this session. The list resets on
-  compaction and `/clear` (`session.start` with source `compact` / `clear`).
+- **No repeats:** a lesson attached once is not attached again this session. The list resets
+  when the main conversation is compacted (`session.compact` that went through: not a
+  `precompute`, not a subagent's, not vetoed) and when the session id changes (`/clear`).
 - **Rules promoted this session** are attached once on the next prompt (the `@` import only
   loads at session start). Not via `prompt.compose`: changing the system prompt mid-session
   discards the prompt cache on every later request.
@@ -238,7 +256,8 @@ Pure functions over file text, plus one writer.
   writing at once share a race window of milliseconds.)
 - **Clean** every title and body before writing: every `@` followed by a non-space character is
   wrapped in a code span (`` `@path` ``), so no entry can act as an import wherever it sits in a
-  line; markdown headings and the `lessons-learned:start/end` markers are stripped; newlines in
+  line (an odd number of backticks would shift the spans, so then every backtick becomes `'`
+  first); markdown headings and the `lessons-learned:start/end` markers are stripped; newlines in
   titles removed; title ≤ 80 and body ≤ 400 characters. *Verify during the build* that Claude
   Code ignores `@` inside code spans; if not, a space is inserted after the `@` instead.
 - **Block insert:** idempotent by markers; creates `CLAUDE.md` when none exists.
@@ -253,6 +272,7 @@ Pure functions over file text, plus one writer.
 | `/lessons delete <id>` | asks for confirmation, then removes the entry |
 | `/lessons setup` | runs project setup again (also after "Not here") |
 | `/lessons pause` · `resume` | stops / restarts capture for this session; recall keeps working |
+| `/lessons eval` | runs the detector eval (§9.5) |
 
 ## 6. Configuration (`userConfig`, set via `/config`)
 
@@ -272,12 +292,14 @@ Claude read, so a planted instruction could travel reply → lesson → rule. De
 
 1. The user sees the exact text before anything is saved; nothing is written without a choice.
 2. Cleaning (§5.5) makes an `@` import, a heading or a block marker impossible in an entry.
-3. The detector prompt treats the tagged blocks as data; its output is parsed as strict JSON and
-   validated field by field.
+3. The detector prompt treats the tagged blocks as data; the JSON object in its reply is parsed
+   and validated field by field.
 4. Recall frames attached lessons as "lessons the user confirmed", inside a context block.
 
-Privacy (README): the detector sends the prompt, the end of the previous reply and the titles of
-existing entries to the configured model through the user's own Claude Code credentials.
+Privacy (README): the detector sends the prompt, the last ~6,000 characters of the previous
+reply, the id, title, tags and kind of every existing entry, and whether the project is set up
+to the configured model through the user's own Claude Code credentials; `/lessons eval` sends
+only the bundled test cases.
 Nothing is sent anywhere else. Project files are committed by default — the README says so and
 points to "keep out of git".
 
@@ -349,7 +371,9 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
    `probe-a model: {"isAnswered":true,"text":"ok","usage":{…}} after 1985 ms`. Note the resolved value
    is an object (`isAnswered`, `text`, `usage`), not a string. Decision: capture starts the call in
    `prompt.submit` without awaiting and races the promise at `turn.complete`; no
-   `$.clock.after(0, …)` workaround is needed.
+   `$.clock.after(0, …)` workaround is needed for it. Setup and confirm do run from
+   `$.clock.after(0, …)` now, for a different reason: a dialog the user leaves open must not hold
+   `session.start` (which holds the first prompt) or `turn.complete`.
 3. **`quoted.md` in `instructionFiles`:** no. `instructionFiles` held `CLAUDE.md` and `plain.md`
    only; `` `@quoted.md` `` in a code span was not followed. Decision: `AT_STRATEGY = "codespan"`.
 

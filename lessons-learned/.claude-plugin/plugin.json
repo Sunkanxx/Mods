@@ -14,7 +14,7 @@
     "ruleCap": {
       "type": "number",
       "title": "Rule cap",
-      "description": "The most rules kept in rules-learned.md before the oldest are suggested for demotion.",
+      "description": "The most rules kept per scope in rules-learned.md. Promoting past it asks which rule goes back to lessons; the candidates are the least-seen rules, then the oldest.",
       "default": 20
     },
     "maxRecall": {

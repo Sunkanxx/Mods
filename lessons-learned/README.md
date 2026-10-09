@@ -5,7 +5,7 @@ A Claude Code mod that makes your corrections stick. It notices when you correct
 ## How it works
 
 1. **Detect.** After each prompt, a short background model call decides whether your message corrects Claude in a way that should carry over to later work (a preference, a convention, a fact about your tools, a skipped process step). One-off steering such as "use the other file", answers to Claude's questions and changes of requirements do not count. This adds no wait to your prompt.
-2. **Confirm.** At the end of the turn a dialog shows the exact text. Nothing is saved without your choice, and you can edit the text in the dialog's "Other" field.
+2. **Confirm.** At the end of the turn a dialog shows the exact text that would be saved, for example `Lesson (project): "Use PowerShell for slash commands" — Git Bash rewrites /cmd into a path. Save it?`. Nothing is saved without your choice, and you can type a replacement text in the dialog's "Other" field.
 3. **Recall.** A saved lesson is attached to later prompts whose words (or recently touched file paths) match its tags. At most 3 per prompt, and each lesson at most once per session.
 4. **Promote.** If the same correction comes up again, the dialog offers to promote the lesson to a rule. Rules live in a file that `CLAUDE.md` imports, so they load at the start of every session. If a rule is broken again, you can note it; its `seen` count then shows which rules are not working.
 
@@ -25,7 +25,7 @@ Restart Claude Code. On first start the mod creates its global files. In a git r
 | Global | `~/.claude/lessons-learned.md` | `~/.claude/rules-learned.md` | `~/.claude/CLAUDE.md` |
 | Project | `<repo>/lessons-learned.md` | `<repo>/rules-learned.md` | `<repo>/CLAUDE.md`, or `<repo>/.claude/CLAUDE.md` if that is the one that exists |
 
-`<repo>` is the git root of the session's working directory. The block is inserted once, found again by its markers, and `CLAUDE.md` is created if none exists:
+`<repo>` is the git root of the session's working directory; in a git worktree that is the worktree's own folder, not the main checkout. The block is inserted once, found again by its markers, and `CLAUDE.md` is created if none exists:
 
 ```md
 <!-- lessons-learned:start -->
@@ -89,22 +89,37 @@ Set in `/config`. Defaults apply until you save a value.
 
 ## Privacy
 
-For each prompt (except slash commands, and only when a dialog can be shown), the detector sends three things to the configured model: your prompt, the last part of Claude's previous reply (about 6,000 characters), and the titles and tags of the existing lessons and rules. The call goes through your own Claude Code credentials. Nothing is sent anywhere else, and the mod has no server of its own.
+For each prompt you type at the terminal (except slash commands, and only when a dialog can be shown), the detector sends exactly this to the configured model:
+
+- your prompt;
+- the last ~6,000 characters of Claude's previous reply;
+- the id, title, tags and kind (lesson or rule) of each existing entry, global and project;
+- whether the project is set up.
+
+The call goes through your own Claude Code credentials. `/lessons eval` sends only the bundled test cases (`eval/cases.json`), none of your prompts or entries. Nothing is sent anywhere else, and the mod has no server of its own.
 
 Entries are stored as plain files on your machine. Project files are **committed by default** (see Project setup); choose "keep out of git" if that is not what you want. The detector is told to leave out secrets and personal data, and you see and can edit every lesson before it is saved.
 
-Because rules are loaded as instructions, the mod limits what can be written: an `@` followed by text, markdown headings and the block markers are neutralised in every entry, the detector's reply is validated as strict JSON, and recalled lessons are framed as lessons you confirmed.
+Because rules are loaded as instructions, the mod limits what can be written: an `@` followed by text, markdown headings and the block markers are neutralised in every entry, the detector's reply is parsed and validated field by field, and recalled lessons are framed as lessons you confirmed.
 
 ## Requirements
 
-Claude Code with mod support. Tested with Claude Code 2.1.295 (the output of `claude --version`); other versions have not been tested. Works on Windows, macOS and Linux.
+Claude Code with mod support. Tested with Claude Code 2.1.295 (the output of `claude --version`); other versions have not been tested. Tested on Windows; macOS and Linux paths are handled but untested.
 
 ## Limitations
 
-- Prompts typed through Remote Control or channels are not captured, because no dialog can be shown there. In `claude -p` runs the mod only recalls.
+- Prompts sent through Remote Control or channels are not captured: capture runs only for prompts typed at the terminal. In `claude -p` runs the mod only recalls; it creates no files there.
 - It is not yet known whether two plugins that ask a question at the same turn end get both dialogs, one, or an error; a dialog that does not appear counts as a dismissal and is offered again at the next turn end.
 - Recall is keyword based: a lesson is attached when at least 2 of its tags (or one multi-word tag) appear in your prompt or the paths of recently touched files.
 - Lessons and rules are context for Claude, not enforcement; nothing blocks a tool call.
+
+## Uninstall
+
+```
+claude plugin uninstall lessons-learned@sunkanxx-mods
+```
+
+Removing the plugin does not remove what it wrote. The import block in `CLAUDE.md` stays, so **your rules keep loading in every session** after the uninstall. If you no longer want them, delete the block (everything from `<!-- lessons-learned:start -->` to `<!-- lessons-learned:end -->`) from `~/.claude/CLAUDE.md` and from each project's `CLAUDE.md` (or `.claude/CLAUDE.md`), then delete `lessons-learned.md` and `rules-learned.md` next to it. In a project set up with "keep out of git", you can also remove the two lines from `.gitignore`.
 
 ## Contributing
 
