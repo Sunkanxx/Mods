@@ -352,3 +352,9 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
    `$.clock.after(0, …)` workaround is needed.
 3. **`quoted.md` in `instructionFiles`:** no. `instructionFiles` held `CLAUDE.md` and `plain.md`
    only; `` `@quoted.md` `` in a code span was not followed. Decision: `AT_STRATEGY = "codespan"`.
+
+4. **Detector eval (2026-10-09):** `Detected: 15/15 · False positives: 0/15` with model `haiku`, after 0 tuning
+   rounds (`DETECTOR_SYSTEM` unchanged). Measured with a throwaway harness plugin that reuses the library code
+   (`DETECTOR_SYSTEM`, `buildDetectorPrompt`, `parseDetectorReply`, same request) and the shipped
+   `eval/cases.json`, run as `claude -p` under the normal login; `/lessons eval` itself was not run, to keep
+   the real `~/.claude` untouched.
