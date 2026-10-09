@@ -5,6 +5,8 @@ export const RECALL_LINE_MAX = 400;
 export const RECALL_LEAD = "Lessons the user confirmed from earlier corrections — apply them where relevant:";
 export const RULES_LEAD = "Rules the user confirmed — follow them for the rest of this session:";
 
+// Control characters plus NEL, LS and PS (U+0085, U+2028, U+2029).
+const LINE_BREAKS = new RegExp("[\u0000-\u001F\u007F\u0085" + String.fromCharCode(0x2028, 0x2029) + "]+", "g");
 const PUNCTUATION = /[-_/\\.:,;()[\]{}"'`]/g;
 
 /** Lowercase, punctuation to spaces, whitespace collapsed, one space at each end. */
@@ -24,14 +26,15 @@ export function matchLessons(lessons, haystack, o) {
     if (o.exclude.has(lesson.id)) continue;
     let hits = 0;
     let multiWord = false;
-    for (const tag of lesson.tags ?? []) {
-      const t = normaliseText(tag);
+    // Dedupe on the normalised form so "slash-command" and "slash command" count once.
+    for (const t of new Set((lesson.tags ?? []).map(normaliseText))) {
       if (t.trim() === "" || !text.includes(t)) continue;
       hits++;
       if (t.trim().includes(" ")) multiWord = true;
     }
     if (hits >= 2 || multiWord) scored.push({ lesson, hits });
   }
+  // `last` is an ISO YYYY-MM-DD string, so string comparison orders it by date.
   scored.sort((a, b) => b.hits - a.hits || (a.lesson.last < b.lesson.last ? 1 : a.lesson.last > b.lesson.last ? -1 : 0));
   return scored.slice(0, o.max).map((s) => s.lesson);
 }
@@ -39,8 +42,10 @@ export function matchLessons(lessons, haystack, o) {
 /** Lead line, then one capped line per entry; "" when there are no entries. */
 export function formatBlock(lead, entries) {
   if (entries.length === 0) return "";
+  // The lead is a trusted constant; entry fields are user text, so each stays on one line.
+  const oneLine = (s) => String(s).replace(LINE_BREAKS, " ");
   const lines = entries.map((e) => {
-    const chars = [...`- ${e.id} ${e.title}: ${e.body}`];
+    const chars = [...`- ${oneLine(e.id)} ${oneLine(e.title)}: ${oneLine(e.body)}`];
     return chars.length > RECALL_LINE_MAX ? chars.slice(0, RECALL_LINE_MAX - 1).join("") + "…" : chars.join("");
   });
   return [lead, ...lines].join("\n");
