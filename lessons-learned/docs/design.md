@@ -179,8 +179,8 @@ Detector system prompt (the wording may be tuned against the eval, the meaning n
 Parsing: strip code fences, `JSON.parse`, validate every field. Invalid JSON, a timeout, an API
 error or a disallowed model → treated as `{"correction": false}`, logged only to the debug log.
 An unknown `repeatOf` id → null. Scope `project` while the project is not set up → `global`.
-Generic tags are dropped; a lesson left with no tags is still offered (it can only be recalled
-once it is a rule).
+Tags are kept only when they are short keywords (§5.5); generic tags are dropped too. A lesson
+left with no tags is still offered (it can only be recalled once it is a rule).
 
 ### 5.3 confirm
 
@@ -194,12 +194,15 @@ the detector's tags and scope, and goes through the same cleaning.
 
 | Detector result | Question | Options |
 |---|---|---|
-| new lesson | *Lesson (<scope>): "<title>" — <body> Save it?* | `Save` · `Save as global` / `Save to project` (the other scope; omitted if the project is not set up) · `Skip` · Other |
-| `repeatOf` → a lesson | *Looks like a repeat of <id> "<target's title>" — <body> Promote it to a rule?* | `Promote to rule` · `Save as new` · `Skip` · Other |
-| `repeatOf` → a rule | *Rule <id> "<target's title>" was broken again — <body> Note it?* | `Note it` · `Skip` · Other (saved as a new lesson) |
+| new lesson | *Lesson (<scope>): "<title>" [tags: <tags>] — <body> Save it?* | `Save` · `Save as global` / `Save to project` (the other scope; omitted if the project is not set up) · `Skip` · Other |
+| `repeatOf` → a lesson | *Looks like a repeat of <id> "<target's title>" — <body> (as a new <scope> lesson: "<title>" [tags: <tags>]). Promote it to a rule?* | `Promote to rule` · `Save as new` · `Skip` · Other |
+| `repeatOf` → a rule | *Rule <id> "<target's title>" was broken again — <body> (as a new <scope> lesson: "<title>" [tags: <tags>]). Note it?* | `Note it` · `Skip` · Other (saved as a new lesson) |
 
-Every question shows the detected body, the text `Save` or `Save as new` would write (§7). A
-repeat names its target by the title it has now. The target is looked up when the dialog opens:
+`<title>`, `<tags>` and `<body>` are the detection's; ` [tags: …]` is left out when no tag
+survived cleaning. Every question shows everything any of its answers could write (§7): the
+title, tags and body that `Save`, `Save as new`, text typed under Other, or the fallback below
+would put in a new lesson. A repeat names its target by the title it has now, and also shows the
+detection's own title, which a new lesson gets. The target is looked up when the dialog opens:
 a lesson promoted since the detection (for example by an earlier repeat in the queue) is asked
 about as a rule, and a demoted rule as a lesson. When the answer comes, a `Promote` of an entry
 that is a rule by then notes it instead, and a `Note it` on an entry that is a lesson by then
@@ -254,12 +257,17 @@ Pure functions over file text, plus one writer.
 - **Write:** re-read the file just before writing, apply the change, then one `$.fs.write` of
   the whole file. (The mod API has no rename, so there is no temp-file swap; two sessions
   writing at once share a race window of milliseconds.)
-- **Clean** every title and body before writing: every `@` followed by a non-space character is
-  wrapped in a code span (`` `@path` ``), so no entry can act as an import wherever it sits in a
-  line (an odd number of backticks would shift the spans, so then every backtick becomes `'`
-  first); markdown headings and the `lessons-learned:start/end` markers are stripped; newlines in
-  titles removed; title ≤ 80 and body ≤ 400 characters. *Verify during the build* that Claude
-  Code ignores `@` inside code spans; if not, a space is inserted after the `@` instead.
+- **Clean** every title and body before writing: newlines become spaces, leading markdown
+  heading marks and the `lessons-learned:start/end` markers are stripped, title ≤ 80 and body
+  ≤ 400 characters. Every `@` at the start of the text or after whitespace, a backtick or a
+  backslash becomes `＠` (U+FF20, fullwidth commercial at), whatever backticks surround it, so no
+  entry can start an import; an `@` inside a word (`me@x.com`) stays. It still reads as `@` to
+  people and to Claude, and cleaning twice changes nothing. Backticks are left as written: the
+  defence does not depend on code spans (§11.3).
+- **Clean tags:** lowercase, trimmed, whitespace collapsed (and NFC); a tag is kept only if it
+  matches `^[\p{L}\p{N}][\p{L}\p{N} -]{0,29}$` (letters or digits in any script, inner spaces
+  and hyphens, ≤ 30 characters) and has at most 3 words; anything else is dropped, not repaired.
+  Generic tags and duplicates are dropped; at most 5 are kept.
 - **Block insert:** idempotent by markers; creates `CLAUDE.md` when none exists.
 
 ### 5.6 `/lessons`
@@ -290,8 +298,11 @@ Defaults live in code: a `userConfig` value only reaches the mod once the user h
 future session. The previous reply fed to the detector can contain text from web pages or files
 Claude read, so a planted instruction could travel reply → lesson → rule. Defences:
 
-1. The user sees the exact text before anything is saved; nothing is written without a choice.
-2. Cleaning (§5.5) makes an `@` import, a heading or a block marker impossible in an entry.
+1. The user sees the exact text before anything is saved — title, tags and body, in every
+   dialog, for every answer that writes (§5.3); nothing is written without a choice.
+2. Cleaning (§5.5) makes an `@` import, a heading or a block marker impossible in an entry's
+   title and body, and keeps only short keyword tags, so no sentence or command reaches the
+   `tags:` line.
 3. The detector prompt treats the tagged blocks as data; the JSON object in its reply is parsed
    and validated field by field.
 4. Recall frames attached lessons as "lessons the user confirmed", inside a context block.
@@ -375,7 +386,12 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
    `$.clock.after(0, …)` now, for a different reason: a dialog the user leaves open must not hold
    `session.start` (which holds the first prompt) or `turn.complete`.
 3. **`quoted.md` in `instructionFiles`:** no. `instructionFiles` held `CLAUDE.md` and `plain.md`
-   only; `` `@quoted.md` `` in a code span was not followed. Decision: `AT_STRATEGY = "codespan"`.
+   only; `` `@quoted.md` `` in a code span was not followed. Decision then: `AT_STRATEGY = "codespan"`.
+   **Replaced after the security review (2026-10-09):** a code span closes only on a backtick run
+   of the same length and an escaped `` \` `` is no backtick, so text around the `@` could undo the
+   span (``Use ``` @evil.md ` for builds`` and ``Note \` @evil.md \` here`` came back unchanged,
+   leaving `@evil.md` as plain text to the import scanner). Cleaning no longer relies on code
+   spans: every `@` that could start an import becomes `＠` (U+FF20) instead (§5.5).
 
 4. **Detector eval (2026-10-09):** `Detected: 15/15 · False positives: 0/15` with model `haiku`, after 0 tuning
    rounds (`DETECTOR_SYSTEM` unchanged). Measured with a throwaway harness plugin that reuses the library code

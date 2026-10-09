@@ -5,7 +5,7 @@ A Claude Code mod that makes your corrections stick. It notices when you correct
 ## How it works
 
 1. **Detect.** After each prompt, a short background model call decides whether your message corrects Claude in a way that should carry over to later work (a preference, a convention, a fact about your tools, a skipped process step). One-off steering such as "use the other file", answers to Claude's questions and changes of requirements do not count. This adds no wait to your prompt.
-2. **Confirm.** At the end of the turn a dialog shows the exact text that would be saved, for example `Lesson (project): "Use PowerShell for slash commands" — Git Bash rewrites /cmd into a path. Save it?`. Nothing is saved without your choice, and you can type a replacement text in the dialog's "Other" field.
+2. **Confirm.** At the end of the turn a dialog shows the exact text that would be saved, for example `Lesson (project): "Use PowerShell for slash commands" [tags: powershell, slash-command] — Git Bash rewrites /cmd into a path. Save it?`. A repeat dialog also shows the title and tags a new lesson would get. Nothing is saved without your choice, and you can type a replacement text in the dialog's "Other" field.
 3. **Recall.** A saved lesson is attached to later prompts whose words (or recently touched file paths) match its tags. At most 3 per prompt, and each lesson at most once per session.
 4. **Promote.** If the same correction comes up again, the dialog offers to promote the lesson to a rule. Rules live in a file that `CLAUDE.md` imports, so they load at the start of every session. If a rule is broken again, you can note it; its `seen` count then shows which rules are not working.
 
@@ -100,7 +100,7 @@ The call goes through your own Claude Code credentials. `/lessons eval` sends on
 
 Entries are stored as plain files on your machine. Project files are **committed by default** (see Project setup); choose "keep out of git" if that is not what you want. The detector is told to leave out secrets and personal data, and you see and can edit every lesson before it is saved.
 
-Because rules are loaded as instructions, the mod limits what can be written: an `@` followed by text, markdown headings and the block markers are neutralised in every entry, the detector's reply is parsed and validated field by field, and recalled lessons are framed as lessons you confirmed.
+Because rules are loaded as instructions, the mod limits what can be written: every `@` that could start an import becomes a fullwidth `＠` (U+FF20) in titles and bodies, markdown headings and the block markers are neutralised in every entry, tags are kept only as short keywords (at most 30 characters and 3 words, letters, digits, spaces and hyphens), the detector's reply is parsed and validated field by field, and recalled lessons are framed as lessons you confirmed.
 
 ## Requirements
 
