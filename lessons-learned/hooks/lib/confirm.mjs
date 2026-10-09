@@ -13,14 +13,20 @@ function truncate(text, max) {
   return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
 }
 
-// Every question shows all that any of its answers could write (spec §7). A repeat names the
-// target by its current title (ctx.target is the entry found now) and also shows the
-// detection's own title: Save as new, text typed under Other and the fallback for a target
-// gone meanwhile all save a new lesson under it.
+// The tags a save would write, as the dialog shows them; nothing when there are none.
+function tagsText(tags) {
+  return tags.length > 0 ? ` [tags: ${tags.join(", ")}]` : "";
+}
+
+// Every question shows all that any of its answers could write: title, tags and body
+// (spec §7). A repeat names the target by its current title (ctx.target is the entry found
+// now) and also shows the new lesson's title and tags: Save as new, text typed under Other
+// and the fallback for a target gone meanwhile all save a new lesson under them.
 export function dialogFor(item, ctx) {
   const d = item.detection;
   const target = ctx.target;
-  const asNew = `(as a new ${d.scope} lesson: "${d.title}").`;
+  const titled = `"${d.title}"${tagsText(d.tags)}`;
+  const asNew = `(as a new ${d.scope} lesson: ${titled}).`;
   if (target && d.repeatKind === "lesson") {
     return {
       kind: "repeatLesson",
@@ -42,7 +48,7 @@ export function dialogFor(item, ctx) {
   options.push("Skip");
   return {
     kind: "new",
-    question: `Lesson (${d.scope}): "${d.title}" — ${d.body} Save it?`,
+    question: `Lesson (${d.scope}): ${titled} — ${d.body} Save it?`,
     options,
     header: HEADER,
   };

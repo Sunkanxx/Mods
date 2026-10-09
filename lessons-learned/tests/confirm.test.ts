@@ -8,7 +8,7 @@ const ctx = { projectAvailable: true, target: null };
 
 test("new lesson dialog", () => {
   const d = dialogFor(item(), ctx);
-  expect(d).toEqual({ kind: "new", question: 'Lesson (project): "Use PowerShell" — Run it in PowerShell. Save it?', options: ["Save", "Save as global", "Skip"], header: "Lesson" });
+  expect(d).toEqual({ kind: "new", question: 'Lesson (project): "Use PowerShell" [tags: a, b] — Run it in PowerShell. Save it?', options: ["Save", "Save as global", "Skip"], header: "Lesson" });
   expect(dialogFor(item({}, { scope: "global" }), ctx).options).toEqual(["Save", "Save to project", "Skip"]);
   expect(dialogFor(item(), { ...ctx, projectAvailable: false }).options).toEqual(["Save", "Skip"]);
 });
@@ -17,7 +17,7 @@ test("repeat of a lesson", () => {
   const it = item({}, { repeatOf: "P-012", repeatKind: "lesson" });
   const d = dialogFor(it, { ...ctx, target: entry("P-012", "Use PowerShell") });
   expect(d.kind).toBe("repeatLesson");
-  expect(d.question).toBe('Looks like a repeat of P-012 "Use PowerShell" — Run it in PowerShell. (as a new project lesson: "Use PowerShell"). Promote it to a rule?');
+  expect(d.question).toBe('Looks like a repeat of P-012 "Use PowerShell" — Run it in PowerShell. (as a new project lesson: "Use PowerShell" [tags: a, b]). Promote it to a rule?');
   expect(d.options).toEqual(["Promote to rule", "Save as new", "Skip"]);
   expect(dialogFor(it, ctx).kind).toBe("new");
 });
@@ -26,7 +26,7 @@ test("repeat of a rule", () => {
   const it = item({}, { repeatOf: "P-003", repeatKind: "rule" });
   const d = dialogFor(it, { ...ctx, target: entry("P-003", "X") });
   expect(d.kind).toBe("repeatRule");
-  expect(d.question).toBe('Rule P-003 "X" was broken again — Run it in PowerShell. (as a new project lesson: "Use PowerShell"). Note it?');
+  expect(d.question).toBe('Rule P-003 "X" was broken again — Run it in PowerShell. (as a new project lesson: "Use PowerShell" [tags: a, b]). Note it?');
   expect(d.options).toEqual(["Note it", "Skip"]);
 });
 
@@ -136,7 +136,19 @@ test("a repeat shows the detection's own title, not only the target's", () => {
     const it = item({}, { title: "Prefer pwsh", repeatOf: "P-012", repeatKind });
     const q = dialogFor(it, { ...ctx, target: entry("P-012", "Use PowerShell") }).question;
     expect(q).toContain('"Use PowerShell"');
-    expect(q).toContain('(as a new project lesson: "Prefer pwsh")');
+    expect(q).toContain('(as a new project lesson: "Prefer pwsh" [tags: a, b])');
     expect(q.endsWith("?")).toBe(true);
   }
+});
+
+test("every dialog shows the tags a save would write, and none when there are none", () => {
+  const its = [
+    [item({}, { tags: ["šumniki", "claude p"] }), null],
+    [item({}, { tags: ["šumniki", "claude p"], repeatOf: "P-012", repeatKind: "lesson" }), entry("P-012", "Old")],
+    [item({}, { tags: ["šumniki", "claude p"], repeatOf: "P-003", repeatKind: "rule" }), entry("P-003", "Old")],
+  ] as const;
+  for (const [it, target] of its) {
+    expect(dialogFor(it, { ...ctx, target }).question).toContain("[tags: šumniki, claude p]");
+  }
+  expect(dialogFor(item({}, { tags: [] }), ctx).question).toBe('Lesson (project): "Use PowerShell" — Run it in PowerShell. Save it?');
 });

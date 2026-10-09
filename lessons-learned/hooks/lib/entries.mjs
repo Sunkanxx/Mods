@@ -151,12 +151,20 @@ export function cleanBody(s) {
   return clean(s, BODY_MAX);
 }
 
+// Tags come from model output and go on the tags: line of every entry, rules-learned.md
+// included: only a short keyword survives (letters or digits in any script, inner spaces and
+// hyphens, at most 30 characters and 3 words). Anything else is dropped, not repaired
+// (spec §5.5). NFC first, so a decomposed letter (s + combining caron) counts as a letter.
+const TAG = /^[\p{L}\p{N}][\p{L}\p{N} -]{0,29}$/u;
+const TAG_WORDS_MAX = 3;
+
 export function normaliseTags(tags) {
   if (!Array.isArray(tags)) return [];
   const out = [];
   for (const t of tags) {
-    const tag = oneLine(t).replace(/[,@]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-    if (tag && !GENERIC_TAGS.has(tag) && !out.includes(tag)) out.push(tag);
+    const tag = String(t ?? "").replace(/\s+/g, " ").trim().toLowerCase().normalize("NFC");
+    if (!TAG.test(tag) || tag.split(" ").length > TAG_WORDS_MAX) continue;
+    if (!GENERIC_TAGS.has(tag) && !out.includes(tag)) out.push(tag);
   }
   return out.slice(0, TAGS_MAX);
 }

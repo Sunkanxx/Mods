@@ -137,7 +137,7 @@ test("review asks once per item and removes the answered", async ($: any, on: an
     asks: ["Save", "Skip"],
   });
   expect(await run($, "review")).toBe("Reviewed 2 items.");
-  expect(seen.asks.map((a) => a.question)).toEqual(['Lesson (global): "First" — Body. Save it?', 'Lesson (global): "Second" — Body. Save it?']);
+  expect(seen.asks.map((a) => a.question)).toEqual(['Lesson (global): "First" [tags: alpha, beta] — Body. Save it?', 'Lesson (global): "Second" [tags: alpha, beta] — Body. Save it?']);
   expect(seen.store.get("review")).toEqual([]);
   expect(ids(seen, G.lessons)).toEqual(["G-001"]);
 });
