@@ -333,15 +333,18 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
 `claude -p "hi" --plugin-dir <probe-a> --plugin-dir <probe-b> --output-format stream-json --verbose`.
 `--plugin-dir` was accepted. `$.ui.log` lines arrived as `ui_log` events.
 
-1. **Two simultaneous asks:** open — to be checked by the user in an interactive session (see plan
-   Task 12 step 4). In `-p` mode both `$.ui.ask` calls rejected with
-   `$.tool.call: no tool named "AskUserQuestion" in this session`, so queue/replace behaviour could
-   not be observed. Interactive command (PowerShell, in a folder holding the probe workdir):
-   `claude --plugin-dir <scratchpad>\probe\probe-a --plugin-dir <scratchpad>\probe\probe-b`,
-   send `hi`, then look at the turn end: do both dialogs appear (one after the other = queued), does
-   only one appear (replaced), or does one log `probe-x ask rejected: …` (rejected)? Decision until
-   checked: build confirm with `ASK_RETRY_DELAY_MS = 1500` and one retry (safe under every outcome);
-   if queued is confirmed, ask directly.
+1. **Two simultaneous asks:** open — to be checked by the user in an interactive session, see
+   plan Task 12 step 4 (`lessons-learned/docs/plan.md`). In `-p` mode both `$.ui.ask` calls rejected
+   with `$.tool.call: no tool named "AskUserQuestion" in this session`, so queue/replace behaviour
+   could not be observed. The check: start an interactive Claude Code session with two plugins that
+   each call `$.ui.ask` in `turn.complete` (for example two copies of the probe, loaded with
+   `--plugin-dir`), send one prompt, and observe whether two dialogs appear one after the other
+   (queued), only the second appears (replaced), or one ask logs a rejection (rejected).
+   Until checked: ask directly; a rejection counts as a dismissal (offered again at the next turn
+   end, then the review list); at most one ask in flight; no retry — a retry would re-show a dialog
+   the user just dismissed, because a dismissal and a clash both reject.
+   Decision to apply once checked: *queued* → ask directly; *replaced or rejected* →
+   `ASK_RETRY_DELAY_MS = 1500` and one retry.
 2. **Un-awaited `$.model.complete` from `prompt.submit`, read at `turn.complete`:** yes. Logged
    `probe-a model: {"isAnswered":true,"text":"ok","usage":{…}} after 1985 ms`. Note the resolved value
    is an object (`isAnswered`, `text`, `usage`), not a string. Decision: capture starts the call in
