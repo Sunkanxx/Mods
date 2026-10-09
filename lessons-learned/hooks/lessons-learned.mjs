@@ -7,9 +7,12 @@
 
 import {
   parseEntries, serializeEntries, emptyFile, FILE_HEADERS,
+  addEntry, removeEntry, replaceEntry, findEntry, entriesOf, nextId, bumpSeen, cleanBody,
 } from "./lib/entries.mjs";
 import { hasBlock, insertBlock, addIgnoreLines, pickClaudeMd } from "./lib/claude-md.mjs";
 import { joinPath, configDirFrom, scopeFiles } from "./lib/paths.mjs";
+import { DETECTOR_SYSTEM, shouldSkip, buildDetectorPrompt, parseDetectorReply } from "./lib/detector.mjs";
+import { dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "./lib/confirm.mjs";
 
 export const KEY_GLOBAL_DONE = "globalSetupDone";
 export const KEY_QUEUE = "queue";
@@ -23,8 +26,27 @@ const YES_IGNORE = "Yes, keep out of git";
 const NOT_HERE = "Not here";
 const GLOBAL_IMPORT = "rules-learned.md";
 
+const DETECTOR_MAX_TOKENS = 400;
+const DETECTION_WAIT_MS = 5000;
+const DIALOG_HEADER = "Lesson";
+
 // Set by register(); later hooks read it.
 let cfg = { model: "haiku", ruleCap: 20, maxRecall: 3 };
+
+// Session-only state (spec §4.4). paused: capture is off (/lessons pause).
+// pendingDetection: the detector call of the latest prompt, resolving to its queued item (or
+// null) once the item is in the queue. asking: a confirmation dialog is open, or waiting.
+let paused = false;
+let pendingDetection = null;
+let asking = false;
+export let promotedThisSession = [];
+
+// Store lists are read, changed and written one change at a time.
+let listChain = Promise.resolve();
+
+export function setPaused(value) {
+  paused = !!value;
+}
 
 export function register(on, options) {
   cfg = {
@@ -32,6 +54,31 @@ export function register(on, options) {
     ruleCap: Number(options?.ruleCap) || 20,
     maxRecall: Number(options?.maxRecall) || 3,
   };
+  pendingDetection = null;
+  asking = false;
+  promotedThisSession = [];
+  listChain = Promise.resolve();
+
+  on("prompt.submit", async ($, e, next) => {
+    try {
+      await startCapture($, e);
+    } catch (err) {
+      debug($, `capture failed: ${err?.message ?? err}`);
+    }
+    return next(e);
+  }).catch(($, e, next) => {
+    // The hook threw or overran its time: the prompt still enters, untouched.
+    debug($, `prompt hook failed (${next.error?.kind}): ${next.error?.message ?? ""}`);
+    return next(e);
+  });
+
+  on("turn.complete", async ($, e, next) => {
+    const done = await next(e);
+    // Not awaited here, as with the setup dialog: an open dialog must not hold the engine.
+    // An interrupted turn keeps the queue for the next answered one (spec §8).
+    if (e.reason === "answer" && !e.agentId) $.clock.after(0, () => void confirmLater($));
+    return done;
+  });
 
   on("session.start", async ($, e, next) => {
     const started = await next(e);
@@ -160,4 +207,254 @@ export async function offerProjectSetup($, { force }) {
   // The block goes last: with it present the project counts as set up.
   await $.fs.write(project.claudeMd, insertBlock(await readText($, project.claudeMd), project.importPath));
   await $.store.delete(optOutKey(repoRoot));
+}
+
+// ---------- capture (spec §5.2) ----------
+
+// The text of the latest assistant message that has any, or null.
+function lastReply(messages) {
+  for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role === "assistant" && typeof m.text === "string" && m.text.trim() !== "") return m.text;
+  }
+  return null;
+}
+
+// Reads what belongs to this submission, then starts the detector in the background:
+// the prompt never waits for the model (or for the lesson files the detector is shown).
+export async function startCapture($, e) {
+  const prompt = String(e?.text ?? "");
+  const base = { prompt, paused, originKind: e?.origin?.kind, hasPreviousReply: true, hasSurfaces: true };
+  if (shouldSkip(base)) return;
+  const hasSurfaces = (await $.session.surfaces()).length > 0;
+  const previousReply = hasSurfaces ? lastReply(await $.session.messages()) : null;
+  if (shouldSkip({ ...base, hasSurfaces, hasPreviousReply: previousReply !== null })) return;
+  const key = `${await $.session.id()}:${await $.session.turns()}`;
+  pendingDetection = detect($, { prompt, previousReply, key });
+}
+
+// Every entry of both scopes, as the detector sees them; a scope that cannot be read adds none.
+async function existingEntries($) {
+  const existing = [];
+  for (const scope of ["global", "project"]) {
+    const s = await readScope($, scope);
+    if (!s) continue;
+    for (const [kind, file] of [["lesson", s.lessons], ["rule", s.rules]]) {
+      for (const { id, title, tags } of entriesOf(file)) existing.push({ id, title, tags, kind });
+    }
+  }
+  return existing;
+}
+
+// The detector call, parsed and queued. Never rejects: any failure is "no correction".
+async function detect($, { prompt, previousReply, key }) {
+  try {
+    const ctx = await context($);
+    const projectSetUp = !!ctx.project?.setUp;
+    const existing = await existingEntries($);
+    const known = new Map(existing.map((x) => [x.id, x.kind]));
+    const reply = await $.model.complete({
+      model: cfg.model,
+      system: DETECTOR_SYSTEM,
+      prompt: buildDetectorPrompt({ previousReply, userMessage: prompt, existing, projectSetUp }),
+      maxTokens: DETECTOR_MAX_TOKENS,
+    });
+    const detection = parseDetectorReply(typeof reply === "string" ? reply : reply?.text, { known, projectSetUp });
+    if (!detection) return null;
+    const item = {
+      key,
+      detection,
+      repoRoot: detection.scope === "project" ? ctx.repoRoot : null,
+      dismissed: 0,
+      createdAt: ctx.today,
+    };
+    let queued = null;
+    await updateList($, KEY_QUEUE, (queue) => {
+      queued = withUniqueKey(item, queue);
+      return [...queue, queued];
+    });
+    return queued;
+  } catch (err) {
+    debug($, `detector failed: ${err?.message ?? err}`);
+    return null;
+  }
+}
+
+// Two prompts can share a turn count (one typed while a turn runs): keep keys apart.
+function withUniqueKey(item, queue) {
+  let key = item.key;
+  for (let n = 2; queue.some((i) => i.key === key); n++) key = `${item.key}:${n}`;
+  return key === item.key ? item : { ...item, key };
+}
+
+// ---------- queue and review lists in $.store (spec §4.4) ----------
+
+function isItem(i) {
+  const d = i?.detection;
+  return typeof i?.key === "string" && typeof i.dismissed === "number" &&
+    typeof d?.title === "string" && typeof d.body === "string" && Array.isArray(d.tags);
+}
+
+async function readList($, key) {
+  const value = await $.store.get(key);
+  return Array.isArray(value) ? value.filter(isItem) : [];
+}
+
+// One change at a time: a detection landing while a dialog is open is not overwritten.
+function updateList($, key, mutate) {
+  const run = listChain.then(() => changeList($, key, mutate));
+  listChain = run.catch(() => {});
+  return run;
+}
+
+async function changeList($, key, mutate) {
+  await $.store.set(key, mutate(await readList($, key)));
+}
+
+// ---------- confirm (spec §5.3) ----------
+
+async function confirmLater($) {
+  try {
+    await runConfirm($);
+  } catch (err) {
+    debug($, `confirmation failed: ${err?.message ?? err}`);
+  }
+}
+
+// Offers the oldest item this session can take, waiting up to 5 s for this turn's detection
+// (a later one stays queued for the next turn end). One dialog at a time.
+export async function runConfirm($) {
+  if (asking) return;
+  asking = true;
+  try {
+    const pending = pendingDetection;
+    pendingDetection = null;
+    if (pending) await Promise.race([pending, $.clock.sleep(DETECTION_WAIT_MS)]);
+    // Nobody can answer (claude -p): an ask would reject and count as a dismissal.
+    if ((await $.session.surfaces()).length === 0) return;
+    const ctx = await context($);
+    const item = (await readList($, KEY_QUEUE)).find((i) => offerable(i, ctx.repoRoot));
+    if (item) await confirmItem($, item, ctx);
+  } finally {
+    asking = false;
+  }
+}
+
+async function confirmItem($, queued, ctx) {
+  const projectAvailable = !!ctx.project?.setUp;
+  // The project is no longer set up: the lesson can only go to the global scope (spec §8).
+  const item = queued.detection.scope === "project" && !projectAvailable
+    ? { ...queued, detection: { ...queued.detection, scope: "global" } }
+    : queued;
+  const d = item.detection;
+  const target = d.repeatOf ? await lookUp($, d.repeatOf, d.repeatKind === "rule" ? "rules" : "lessons") : null;
+  const dialog = dialogFor(item, { projectAvailable, target });
+  let answer;
+  try {
+    answer = await $.ui.ask(dialog.question, { options: dialog.options, header: dialog.header });
+  } catch (err) {
+    debug($, `confirmation not answered: ${err?.message ?? err}`);
+    await dismiss($, queued);
+    return;
+  }
+  await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => i.key !== queued.key));
+  await applyAction($, item, interpret(answer, item, dialog));
+}
+
+// Dismissed once: offered again at the next turn end. Twice: moved to the review list.
+async function dismiss($, item) {
+  const { item: next, toReview } = onDismiss(item);
+  if (!toReview) {
+    await updateList($, KEY_QUEUE, (queue) => queue.map((i) => (i.key === item.key ? next : i)));
+    return;
+  }
+  await updateList($, KEY_REVIEW, (review) => [...review, next]);
+  await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => i.key !== item.key));
+}
+
+const scopeOfId = (id) => (id.startsWith("P-") ? "project" : "global");
+
+// The entry with this id in the lessons or rules file of its scope, read now; null if gone.
+async function lookUp($, id, which) {
+  const s = await readScope($, scopeOfId(id));
+  return s ? findEntry(s[which], id) : null;
+}
+
+export async function applyAction($, item, action) {
+  const d = item.detection;
+  if (action.type === "skip") return;
+  if (action.type === "promote") {
+    if (await lookUp($, action.id, "lessons")) await promote($, scopeOfId(action.id), action.id);
+    else await saveLesson($, d.scope, d, d.body);
+    return;
+  }
+  if (action.type === "note") {
+    if (await lookUp($, action.id, "rules")) await noteRule($, action.id);
+    else await saveLesson($, d.scope, d, d.body);
+    return;
+  }
+  // save: text typed under Other replaces the body, cleaned like the detector's.
+  const body = typeof action.body === "string" ? cleanBody(action.body) : d.body;
+  if (body) await saveLesson($, action.scope, d, body);
+}
+
+async function saveLesson($, scope, d, body) {
+  const s = await readScope($, scope);
+  if (!s) {
+    debug($, `cannot save to the ${scope} scope`);
+    return;
+  }
+  const { today } = await context($);
+  // The id is taken from the files as they are at the write, across lessons and rules.
+  await updateFile($, s.paths.lessons, "lessons", (f) =>
+    addEntry(f, { id: nextId(scope, [f, s.rules]), title: d.title, tags: d.tags, seen: 1, first: today, last: today, body }));
+}
+
+async function noteRule($, id) {
+  const s = await readScope($, scopeOfId(id));
+  if (!s) return;
+  const { today } = await context($);
+  await updateFile($, s.paths.rules, "rules", (f) => {
+    const rule = findEntry(f, id);
+    return rule ? replaceEntry(f, bumpSeen(rule, today)) : f;
+  });
+}
+
+function upsert(file, entry) {
+  return findEntry(file, entry.id) ? replaceEntry(file, entry) : addEntry(file, entry);
+}
+
+// Moves a lesson to the rules of its scope, seen +1. With the scope at ruleCap, asks which
+// rule goes back to lessons first; cancelled, dismissed or gone: false, nothing written.
+export async function promote($, scope, id) {
+  let s = await readScope($, scope);
+  if (!s || !findEntry(s.lessons, id)) return false;
+  const rules = entriesOf(s.rules);
+  let demoteId = null;
+  if (rules.length >= cfg.ruleCap) {
+    const cap = capDialog(scope, rules);
+    let answer;
+    try {
+      answer = await $.ui.ask(cap.question, { options: cap.options, header: DIALOG_HEADER });
+    } catch (err) {
+      debug($, `promotion not confirmed: ${err?.message ?? err}`);
+      return false;
+    }
+    demoteId = interpretCap(answer, rules, cap.candidates);
+    if (!demoteId) return false;
+    // The dialog may have been open a while: continue from the files as they are now.
+    s = await readScope($, scope);
+    if (!s) return false;
+  }
+  const lesson = findEntry(s.lessons, id);
+  if (!lesson) return false;
+  const demoted = demoteId ? findEntry(s.rules, demoteId) : null;
+  const { today } = await context($);
+  const promoted = bumpSeen(lesson, today);
+  // Each write adds before the next removes: a failed write leaves an entry twice, never lost.
+  if (demoted) await updateFile($, s.paths.lessons, "lessons", (f) => upsert(f, demoted));
+  await updateFile($, s.paths.rules, "rules", (f) => upsert(demoted ? removeEntry(f, demoted.id).file : f, promoted));
+  await updateFile($, s.paths.lessons, "lessons", (f) => removeEntry(f, id).file);
+  promotedThisSession.push(promoted);
+  return true;
 }
