@@ -233,9 +233,9 @@ this session:".
 Pure functions over file text, plus one writer.
 
 - **Parse** is tolerant: a block it cannot parse is kept verbatim and written back unchanged.
-- **Write:** re-read the file just before writing, apply the change, write to a temp file in the
-  same directory and rename over the original (two sessions writing at once lose nothing but a
-  race of milliseconds).
+- **Write:** re-read the file just before writing, apply the change, then one `$.fs.write` of
+  the whole file. (The mod API has no rename, so there is no temp-file swap; two sessions
+  writing at once share a race window of milliseconds.)
 - **Clean** every title and body before writing: every `@` followed by a non-space character is
   wrapped in a code span (`` `@path` ``), so no entry can act as an import wherever it sits in a
   line; markdown headings and the `lessons-learned:start/end` markers are stripped; newlines in
@@ -292,7 +292,7 @@ points to "keep out of git".
 | Hand-edited or malformed files | unparseable blocks kept verbatim; ids continue from the highest |
 | Files deleted by hand | recreated (empty, with header) at the next session start |
 | Block removed from `CLAUDE.md` by hand | global: re-inserted; project: treated as not set up, setup asks again |
-| Two sessions writing at once | re-read before write, temp file + rename |
+| Two sessions writing at once | re-read just before one whole-file write |
 | No surfaces (`claude -p`) | setup, capture and confirm all skipped; recall still runs |
 | Not in a git repo | global scope only |
 
