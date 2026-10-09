@@ -20,6 +20,7 @@ import { mock } from "claude-code/testing";
 //   now        number              the mocked clock's start, ms (default 2026-10-09 12:00 UTC)
 //   writeFails boolean | (path) => boolean   $.fs.write rejects (for matching paths)
 //   readFails  boolean | (path) => boolean   $.fs.read rejects (for matching paths)
+//   (any tool.call other than AskUserQuestion throws: unexpected calls fail loudly)
 //
 // Returns the recorders and handles:
 //   files      Map<path, text>     the current file system
@@ -27,8 +28,10 @@ import { mock } from "claude-code/testing";
 //   asks       { question, options }[]   every $.ui.ask made
 //   logs       { text, to }[]      every $.ui.log
 //   modelCalls ModelCompleteRequest[]    every $.model.complete request
-//   store      Map<key, value>     the current $.store (a plain stub: mock.store cannot be read back)
-//   clock      the mock clock (advance, settle, now)
+//   store      Map<key, value>     the current $.store (a stub that JSON-round-trips values, with
+//                                  get/set/delete/keys; mock.store cannot be read back)
+//   clock      the mock clock (advance, settle, now); $.clock.after / sleep are held on it, so
+//              call `await clock.advance(0)` to run what a hook scheduled with after(0, ...)
 //   queueAsk(...answers) / queueModel(...replies)   add scripted answers later
 //   $          a stand-in `$` over the same state, to call the mod's exported functions
 //              directly (a test's own `$` only has what the test file itself uses)
@@ -111,10 +114,12 @@ export function world(on: any, opts: WorldOptions = {}) {
     id: () => opts.sessionId ?? "s1",
     turns: () => opts.turns ?? 1,
   };
+  // Values round-trip through JSON, as the engine's store keeps them.
   const store = {
     get: (key: string) => seen.store.get(key),
-    set: (key: string, value: unknown) => void seen.store.set(key, value),
+    set: (key: string, value: unknown) => void seen.store.set(key, value === undefined ? value : JSON.parse(JSON.stringify(value))),
     delete: (key: string) => void seen.store.delete(key),
+    keys: () => [...seen.store.keys()],
   };
 
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd }));
@@ -129,10 +134,11 @@ export function world(on: any, opts: WorldOptions = {}) {
   on("store.get", (_$: any, e: any) => ({ value: store.get(e.key) }));
   on("store.set", (_$: any, e: any) => ({ value: store.set(e.key, e.value) }));
   on("store.delete", (_$: any, e: any) => ({ value: store.delete(e.key) }));
+  on("store.keys", () => ({ value: store.keys() }));
   on("ui.log", (_$: any, e: any) => ({ value: log(e.text, e.to) }));
   // $.ui.ask is a tool.call of AskUserQuestion.
   on("tool.call", (_$: any, e: any) => {
-    if (e.tool !== "AskUserQuestion") return { result: undefined, text: "" };
+    if (e.tool !== "AskUserQuestion") throw new Error(`unexpected tool call: ${e.tool}`);
     const q = e.questions[0];
     const answer = ask(q.question, q.options.map((o: any) => o.label));
     return { result: { answers: { [q.question]: answer } }, text: answer };
@@ -144,7 +150,11 @@ export function world(on: any, opts: WorldOptions = {}) {
   seen.$ = {
     fs: asyncOf({ exists, read, write }),
     env: asyncOf({ get: (name: string) => env[name] }),
-    clock: asyncOf({ now: () => seen.clock.now() }),
+    clock: {
+      ...asyncOf({ now: () => seen.clock.now() }),
+      // The stand-in runs the callback when the mock clock reaches it.
+      after: (ms: number, fn: () => void) => void seen.clock.sleep(ms).then(fn),
+    },
     session: asyncOf(session),
     store: asyncOf(store),
     ui: { log: (text: string, o?: any) => log(text, o?.to ?? "transcript"), ask: async (q: string, o: string[]) => ask(q, o) },

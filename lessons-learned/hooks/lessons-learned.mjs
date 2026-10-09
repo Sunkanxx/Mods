@@ -40,13 +40,19 @@ export function register(on, options) {
     } catch (err) {
       debug($, `global setup failed: ${err?.message ?? err}`);
     }
-    try {
-      await offerProjectSetup($, { force: false });
-    } catch (err) {
-      debug($, `project setup failed: ${err?.message ?? err}`);
-    }
+    // Not awaited here: the engine holds the first prompt until session.start resolves,
+    // and a dialog the user leaves open must not do that.
+    $.clock.after(0, () => void offerProjectSetupLater($));
     return started;
   });
+}
+
+async function offerProjectSetupLater($) {
+  try {
+    await offerProjectSetup($, { force: false });
+  } catch (err) {
+    debug($, `project setup failed: ${err?.message ?? err}`);
+  }
 }
 
 function debug($, text) {
@@ -60,6 +66,7 @@ async function readText($, path) {
 }
 
 export async function context($) {
+  // Dates are UTC by design.
   const now = await $.clock.now();
   const today = new Date(now).toISOString().slice(0, 10);
   const configDir = configDirFrom({
@@ -86,16 +93,16 @@ export async function context($) {
 }
 
 export async function readScope($, scope) {
-  const ctx = await context($);
-  const base = scope === "global" ? ctx.configDir : ctx.project?.setUp ? ctx.repoRoot : null;
-  if (!base) return null;
-  const paths = scopeFiles(base);
   try {
+    const ctx = await context($);
+    const base = scope === "global" ? ctx.configDir : ctx.project?.setUp ? ctx.repoRoot : null;
+    if (!base) return null;
+    const paths = scopeFiles(base);
     const lessons = parseEntries((await readText($, paths.lessons)) ?? serializeEntries(emptyFile("lessons")));
     const rules = parseEntries((await readText($, paths.rules)) ?? serializeEntries(emptyFile("rules")));
     return { lessons, rules, paths };
   } catch (err) {
-    debug($, `cannot read ${base}: ${err?.message ?? err}`);
+    debug($, `cannot read ${scope} scope: ${err?.message ?? err}`);
     return null;
   }
 }
@@ -146,10 +153,11 @@ export async function offerProjectSetup($, { force }) {
   }
   if (answer !== YES_COMMIT && answer !== YES_IGNORE) return;
   await ensureFiles($, repoRoot);
-  await $.fs.write(project.claudeMd, insertBlock(await readText($, project.claudeMd), project.importPath));
   if (answer === YES_IGNORE) {
     const gitignore = joinPath(repoRoot, ".gitignore");
     await $.fs.write(gitignore, addIgnoreLines(await readText($, gitignore)));
   }
+  // The block goes last: with it present the project counts as set up.
+  await $.fs.write(project.claudeMd, insertBlock(await readText($, project.claudeMd), project.importPath));
   await $.store.delete(optOutKey(repoRoot));
 }
