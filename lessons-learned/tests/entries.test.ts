@@ -38,7 +38,8 @@ test("parses an entry", () => {
   ]);
 });
 
-test("round-trips a file exactly", () => {
+// Canonical layout: every entry followed by exactly one blank line.
+test("round-trips a canonical file exactly", () => {
   expect(serializeEntries(parseEntries(FULL))).toBe(FULL);
   expect(parseEntries(FULL).blocks.map((b) => b.kind)).toEqual(["entry", "raw", "entry"]);
 });
@@ -148,4 +149,38 @@ test("normaliseTags", () => {
   ).toEqual(["powershell", "slash-command", "a", "b", "c"]);
   expect(normaliseTags("nope")).toEqual([]);
   expect(normaliseTags(null)).toEqual([]);
+});
+
+test("addEntry on a header without trailing newline", () => {
+  const f = addEntry(parseEntries("# H"), mk("P-001"));
+  const back = parseEntries(serializeEntries(f));
+  expect(entriesOf(back).map((e) => e.id)).toEqual(["P-001"]);
+  expect(nextId("project", [back])).toBe("P-002");
+});
+
+test("cleanBody keeps the limit and leaves no bare @path", () => {
+  const out = cleanBody("@a/b.md ".repeat(60));
+  expect(Array.from(out).length).toBeLessThanOrEqual(400);
+  expect(out.split(/(`[^`]*`)/).filter((_, i) => i % 2 === 0).join("")).not.toMatch(/@\S/);
+  expect((out.match(/`/g) ?? []).length % 2).toBe(0);
+});
+
+test("cleanTitle defuses @ and tags drop it", () => {
+  if (AT_STRATEGY === "codespan") expect(cleanTitle("see @a/b.md")).toBe("see `@a/b.md`");
+  expect(normaliseTags(["@x/y"])).toEqual(["x/y"]);
+});
+
+test("nextId counts ids in malformed raw blocks", () => {
+  const f = parseEntries("# H\n\n## P-009 · broken\nno meta\n\n");
+  expect(nextId("project", [f])).toBe("P-010");
+});
+
+test("serialise normalises entry whitespace", () => {
+  const meta = (n: string) => `tags: a, b · seen: 1 · first: 2026-10-01 · last: 2026-10-01\n${n}`;
+  const t = `# H\n\n## P-001 · A\n${meta("One.")}\n## P-002 · B\n${meta("Two.")}\n\n\n## P-003 · C\n${meta("Three.")}`;
+  const f = parseEntries(t);
+  expect(entriesOf(f).map((e) => e.body)).toEqual(["One.", "Two.", "Three."]);
+  expect(serializeEntries(f)).toBe(
+    `# H\n\n## P-001 · A\n${meta("One.")}\n\n## P-002 · B\n${meta("Two.")}\n\n## P-003 · C\n${meta("Three.")}\n\n`,
+  );
 });

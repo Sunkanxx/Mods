@@ -25,6 +25,7 @@ const META_SEEN = " · seen: ";
 const LINE1 = /^## ([GP]-\d{3,}) · (.+)$/;
 const LINE2 = /^tags: (.*) · seen: (\d+) · first: (\d{4}-\d{2}-\d{2}) · last: (\d{4}-\d{2}-\d{2})$/;
 const LEADING_HASHES = /^(?:#+\s*)+/;
+const RAW_ID = /^## ([GP]-\d{3,})/;
 const MARKERS = /<!--\s*lessons-learned:(?:start|end)\s*-->/g;
 
 // Split the raw block text into a block: an entry if both meta lines match, else raw.
@@ -78,12 +79,16 @@ export function findEntry(file, id) {
 // A trailing raw block may lack its closing blank line; add it so the new block starts cleanly.
 export function addEntry(file, entry) {
   const blocks = file.blocks.slice();
+  let header = file.header;
+  if (blocks.length === 0 && header !== "" && !header.endsWith("\n\n")) {
+    header = header.replace(/\n*$/, "\n\n");
+  }
   const last = blocks[blocks.length - 1];
   if (last?.kind === "raw" && !last.text.endsWith("\n\n")) {
     blocks[blocks.length - 1] = { kind: "raw", text: last.text.replace(/\n*$/, "\n\n") };
   }
   blocks.push({ kind: "entry", entry });
-  return { ...file, blocks };
+  return { ...file, header, blocks };
 }
 
 export function removeEntry(file, id) {
@@ -103,8 +108,9 @@ export function nextId(scope, files) {
   const prefix = scope === "global" ? "G" : "P";
   let max = 0;
   for (const f of files) {
-    for (const e of entriesOf(f)) {
-      if (e.id.startsWith(prefix + "-")) max = Math.max(max, Number(e.id.slice(2)));
+    for (const b of f.blocks) {
+      const id = b.kind === "entry" ? b.entry.id : RAW_ID.exec(b.text)?.[1];
+      if (id?.startsWith(prefix + "-")) max = Math.max(max, Number(id.slice(2)));
     }
   }
   return `${prefix}-${String(max + 1).padStart(3, "0")}`;
@@ -120,11 +126,15 @@ function oneLine(s) {
 
 function truncate(s, max) {
   const chars = Array.from(s);
-  return chars.length > max ? chars.slice(0, max - 1).join("") + "…" : s;
+  if (chars.length <= max) return s;
+  let cut = chars.slice(0, max - 1);
+  const ticks = cut.filter((c) => c === "`").length;
+  if (ticks % 2 === 1) cut = cut.slice(0, cut.lastIndexOf("`"));
+  return cut.join("") + "…";
 }
 
 export function cleanTitle(s) {
-  return truncate(oneLine(s).replace(LEADING_HASHES, ""), TITLE_MAX);
+  return truncate(defuseAt(oneLine(s).replace(LEADING_HASHES, "")), TITLE_MAX);
 }
 
 // Keep "@path" in stored text from being read as a CLAUDE.md import.
@@ -137,14 +147,14 @@ function defuseAt(s) {
 }
 
 export function cleanBody(s) {
-  return defuseAt(truncate(oneLine(s).replace(LEADING_HASHES, ""), BODY_MAX));
+  return truncate(defuseAt(oneLine(s).replace(LEADING_HASHES, "")), BODY_MAX);
 }
 
 export function normaliseTags(tags) {
   if (!Array.isArray(tags)) return [];
   const out = [];
   for (const t of tags) {
-    const tag = oneLine(t).replace(/,/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    const tag = oneLine(t).replace(/[,@]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
     if (tag && !GENERIC_TAGS.has(tag) && !out.includes(tag)) out.push(tag);
   }
   return out.slice(0, TAGS_MAX);
