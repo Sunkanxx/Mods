@@ -35,7 +35,8 @@ test("interpret", () => {
   const nd = dialogFor(it, ctx);
   expect(interpret("Save", it, nd)).toEqual({ type: "save", scope: "project" });
   expect(interpret("Save as global", it, nd)).toEqual({ type: "save", scope: "global" });
-  expect(interpret("Save to project", item({}, { scope: "global" }), nd)).toEqual({ type: "save", scope: "project" });
+  const gi = item({}, { scope: "global" });
+  expect(interpret("Save to project", gi, dialogFor(gi, ctx))).toEqual({ type: "save", scope: "project" });
   expect(interpret("Skip", it, nd)).toEqual({ type: "skip" });
   expect(interpret("my text", it, nd)).toEqual({ type: "save", scope: "project", body: "my text" });
   expect(interpret("  \n ", it, nd)).toEqual({ type: "skip" });
@@ -86,4 +87,28 @@ test("offerable", () => {
   expect(offerable(item(), "/r")).toBe(true);
   expect(offerable(item(), "/other")).toBe(false);
   expect(offerable(item(), null)).toBe(false);
+});
+
+test("promote and note take the id from the item, not the question", () => {
+  const rl = item({}, { repeatOf: "P-012", repeatKind: "lesson" });
+  const rd = { kind: "repeatLesson", question: "no id here", options: ["Promote to rule", "Save as new", "Skip"], header: "Lesson" };
+  expect(interpret("Promote to rule", rl, rd)).toEqual({ type: "promote", id: "P-012" });
+  const ru = item({}, { repeatOf: "P-003", repeatKind: "rule" });
+  const ud = { kind: "repeatRule", question: "something else", options: ["Note it", "Skip"], header: "Lesson" };
+  expect(interpret("Note it", ru, ud)).toEqual({ type: "note", id: "P-003" });
+});
+
+test("scope labels count only when offered", () => {
+  const it = item();
+  const d = dialogFor(it, { ...ctx, projectAvailable: false });
+  expect(interpret("Save to project", it, d)).toEqual({ type: "save", scope: "project", body: "Save to project" });
+  expect(interpret("Save as global", it, d)).toEqual({ type: "save", scope: "project", body: "Save as global" });
+});
+
+test("a label of another dialog kind is Other text", () => {
+  const it = item();
+  expect(interpret("Promote to rule", it, dialogFor(it, ctx))).toEqual({ type: "save", scope: "project", body: "Promote to rule" });
+  const ru = item({}, { repeatOf: "P-003", repeatKind: "rule" });
+  const ud = dialogFor(ru, { ...ctx, target: entry("P-003", "X") });
+  expect(interpret("Save", ru, ud)).toEqual({ type: "save", scope: "project", body: "Save" });
 });

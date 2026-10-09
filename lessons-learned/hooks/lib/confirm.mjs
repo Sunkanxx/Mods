@@ -48,23 +48,17 @@ export function interpret(answer, item, dialog) {
   const text = typeof answer === "string" ? answer : "";
   if (text === "Skip") return { type: "skip" };
   if (dialog.kind === "repeatRule") {
-    if (text === "Note it") return { type: "note", id: idFromQuestion(dialog.question) };
+    if (text === "Note it") return { type: "note", id: item.detection.repeatOf };
   } else if (dialog.kind === "repeatLesson") {
-    if (text === "Promote to rule") return { type: "promote", id: idFromQuestion(dialog.question) };
+    if (text === "Promote to rule") return { type: "promote", id: item.detection.repeatOf };
     if (text === "Save as new") return { type: "save", scope };
   } else {
     if (text === "Save") return { type: "save", scope };
-    if (text === "Save as global") return { type: "save", scope: "global" };
-    if (text === "Save to project") return { type: "save", scope: "project" };
+    if (text === "Save as global" && dialog.options.includes(text)) return { type: "save", scope: "global" };
+    if (text === "Save to project" && dialog.options.includes(text)) return { type: "save", scope: "project" };
   }
   if (text.trim() === "") return { type: "skip" };
   return { type: "save", scope, body: text };
-}
-
-// The target id is the first id in the question (the title comes after it).
-function idFromQuestion(question) {
-  const m = /\b([GP]-\d+)\b/.exec(question);
-  return m ? m[1] : "";
 }
 
 export function onDismiss(item) {
