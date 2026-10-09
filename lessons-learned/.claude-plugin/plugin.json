@@ -1,0 +1,27 @@
+{
+  "name": "lessons-learned",
+  "version": "0.1.0",
+  "description": "Learns from your corrections: confirms each one, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session.",
+  "author": { "name": "Sunkanxx" },
+  "license": "MIT",
+  "userConfig": {
+    "model": {
+      "type": "string",
+      "title": "Detector model",
+      "description": "The model that decides whether a prompt is a correction.",
+      "default": "haiku"
+    },
+    "ruleCap": {
+      "type": "number",
+      "title": "Rule cap",
+      "description": "The most rules kept in rules-learned.md before the oldest are suggested for demotion.",
+      "default": 20
+    },
+    "maxRecall": {
+      "type": "number",
+      "title": "Recall limit",
+      "description": "The most lessons attached to one prompt.",
+      "default": 3
+    }
+  }
+}

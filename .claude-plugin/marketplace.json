@@ -1,0 +1,14 @@
+{
+  "name": "sunkanxx-mods",
+  "owner": {
+    "name": "Sunkanxx"
+  },
+  "description": "Sunkanxx's Claude Code mods",
+  "plugins": [
+    {
+      "name": "lessons-learned",
+      "source": "./lessons-learned",
+      "description": "Learns from your corrections: confirms each one, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session."
+    }
+  ]
+}
