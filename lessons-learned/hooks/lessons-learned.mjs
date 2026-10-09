@@ -112,6 +112,15 @@ export function register(on, options) {
   on("session.start", async ($, e, next) => {
     const started = await next(e);
     try {
+      await $.command.register({
+        name: "lessons",
+        description: "Learned lessons and rules: list, review, promote, demote, delete, setup, pause, resume",
+        argumentHint: "[review|promote <id>|demote <id>|delete <id>|setup|pause|resume]",
+      });
+    } catch (err) {
+      debug($, `command not registered: ${err?.message ?? err}`);
+    }
+    try {
       await ensureGlobal($);
     } catch (err) {
       debug($, `global setup failed: ${err?.message ?? err}`);
@@ -120,6 +129,15 @@ export function register(on, options) {
     // and a dialog the user leaves open must not do that.
     $.clock.after(0, () => void offerProjectSetupLater($));
     return started;
+  });
+
+  on("command.run", { command: "lessons" }, async ($, e) => {
+    try {
+      return { text: await runCommand($, String(e.args ?? "")) };
+    } catch (err) {
+      debug($, `command failed: ${err?.message ?? err}`);
+      return { text: "lessons-learned could not do that. See the debug log." };
+    }
   });
 }
 
@@ -395,13 +413,15 @@ export async function runConfirm($) {
     if ((await $.session.surfaces()).length === 0) return;
     const ctx = await context($);
     const item = (await readList($, KEY_QUEUE)).find((i) => offerable(i, ctx.repoRoot));
-    if (item) await confirmItem($, item, ctx);
+    if (item) await confirmItem($, item, ctx, KEY_QUEUE);
   } finally {
     asking = false;
   }
 }
 
-async function confirmItem($, queued, ctx) {
+// Asks about one stored item and applies the answer. True when answered (the item leaves its
+// list); a dismissal counts against a queued item and leaves a review item where it is.
+async function confirmItem($, queued, ctx, listKey) {
   const projectAvailable = !!ctx.project?.setUp;
   // The project is no longer set up: the lesson can only go to the global scope (spec §8).
   const item = queued.detection.scope === "project" && !projectAvailable
@@ -415,11 +435,12 @@ async function confirmItem($, queued, ctx) {
     answer = await $.ui.ask(dialog.question, { options: dialog.options, header: dialog.header });
   } catch (err) {
     debug($, `confirmation not answered: ${err?.message ?? err}`);
-    await dismiss($, queued);
-    return;
+    if (listKey === KEY_QUEUE) await dismiss($, queued);
+    return false;
   }
-  await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => i.key !== queued.key));
+  await updateList($, listKey, (list) => list.filter((i) => i.key !== queued.key));
   await applyAction($, item, interpret(answer, item, dialog));
+  return true;
 }
 
 // Dismissed once: offered again at the next turn end. Twice: moved to the review list.
@@ -518,4 +539,109 @@ export async function promote($, scope, id) {
   await updateFile($, s.paths.lessons, "lessons", (f) => removeEntry(f, id).file);
   promotedThisSession.push(promoted);
   return true;
+}
+
+// ---------- /lessons (spec §5.6) ----------
+
+const USAGE = "Usage: /lessons [review | promote <id> | demote <id> | delete <id> | setup | pause | resume]";
+
+async function runCommand($, args) {
+  const [, verb = "", rest = ""] = /^(\S*)\s*([\s\S]*)$/.exec(args.trim()) ?? [];
+  const word = verb.toLowerCase();
+  const id = rest.trim().toUpperCase();
+  if (word === "") return await listText($);
+  if (word === "pause" || word === "resume") {
+    paused = word === "pause";
+    return paused ? "Capture paused for this session." : "Capture resumed.";
+  }
+  if (word === "review") return await reviewText($);
+  if (word === "setup") return await setupText($);
+  if (word === "promote" || word === "demote" || word === "delete") {
+    if (id === "") return USAGE;
+    return await changeEntry($, word, id);
+  }
+  return USAGE;
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const entryLine = (e) => `${e.id} · ${e.title} · seen ${e.seen}`;
+
+async function listText($) {
+  const rules = [];
+  const lessons = [];
+  const counts = [];
+  for (const scope of ["global", "project"]) {
+    const s = await readScope($, scope);
+    if (!s) continue;
+    const r = entriesOf(s.rules);
+    const l = entriesOf(s.lessons);
+    rules.push(...r);
+    lessons.push(...l);
+    counts.push(`${scope === "global" ? "Global" : "Project"}: ${plural(r.length, "rule")}, ${plural(l.length, "lesson")}`);
+  }
+  const toReview = (await readList($, KEY_REVIEW)).length;
+  if (toReview > 0) counts.push(`${toReview} to review`);
+  const lines = [counts.length > 0 ? counts.join(" · ") : "Nothing saved yet."];
+  if (rules.length > 0) lines.push("", "Rules", ...rules.map(entryLine));
+  if (lessons.length > 0) lines.push("", "Lessons", ...lessons.map(entryLine));
+  return lines.join("\n");
+}
+
+// Walks the review list: one dialog per item, the same as at a turn end.
+async function reviewText($) {
+  if (asking) return "A lesson dialog is already open.";
+  asking = true;
+  try {
+    const ctx = await context($);
+    const items = (await readList($, KEY_REVIEW)).filter((i) => offerable(i, ctx.repoRoot));
+    if (items.length === 0) return "Nothing to review.";
+    if ((await $.session.surfaces()).length === 0) return "No dialog can be shown in this run.";
+    let answered = 0;
+    for (const item of items) {
+      if (!(await confirmItem($, item, ctx, KEY_REVIEW))) break;
+      answered++;
+    }
+    const left = items.length - answered;
+    return `Reviewed ${plural(answered, "item")}${left > 0 ? `, ${left} left` : ""}.`;
+  } finally {
+    asking = false;
+  }
+}
+
+async function setupText($) {
+  const { repoRoot } = await context($);
+  if (!repoRoot) return "Not in a git repository.";
+  await offerProjectSetup($, { force: true });
+  return (await context($)).project?.setUp ? "Lessons are set up for this project." : "This project is not set up.";
+}
+
+// promote, demote and delete find the id in either scope's files.
+async function changeEntry($, verb, id) {
+  const s = await readScope($, scopeOfId(id));
+  const lesson = s ? findEntry(s.lessons, id) : null;
+  const rule = s ? findEntry(s.rules, id) : null;
+  if (!lesson && !rule) return `No entry ${id}.`;
+  const scope = scopeOfId(id);
+  if (verb === "promote") {
+    if (!lesson) return `${id} is already a rule.`;
+    return (await promote($, scope, id)) ? `Promoted ${id} to a rule.` : `${id} was not promoted.`;
+  }
+  if (verb === "demote") {
+    if (!rule) return `${id} is already a lesson.`;
+    await updateFile($, s.paths.lessons, "lessons", (f) => upsert(f, rule));
+    await updateFile($, s.paths.rules, "rules", (f) => removeEntry(f, id).file);
+    return `Demoted ${id} to a lesson.`;
+  }
+  const entry = lesson ?? rule;
+  let answer;
+  try {
+    answer = await $.ui.ask(`Delete ${id} "${entry.title}"?`, { options: ["Delete", "Keep"], header: DIALOG_HEADER });
+  } catch (err) {
+    debug($, `delete not confirmed: ${err?.message ?? err}`);
+    return `Kept ${id}.`;
+  }
+  if (answer !== "Delete") return `Kept ${id}.`;
+  const [path, kind] = lesson ? [s.paths.lessons, "lessons"] : [s.paths.rules, "rules"];
+  await updateFile($, path, kind, (f) => removeEntry(f, id).file);
+  return `Deleted ${id}.`;
 }

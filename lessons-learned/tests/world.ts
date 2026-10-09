@@ -33,6 +33,7 @@ import { mock } from "claude-code/testing";
 //   asks       { question, options }[]   every $.ui.ask made
 //   logs       { text, to }[]      every $.ui.log
 //   modelCalls ModelCompleteRequest[]    every $.model.complete request
+//   commands   every $.command.register request
 //   store      Map<key, value>     the current $.store (a stub that JSON-round-trips values, with
 //                                  get/set/delete/keys; mock.store cannot be read back)
 //   clock      the mock clock (advance, settle, now); $.clock.after / sleep are held on it, so
@@ -78,6 +79,7 @@ export function world(on: any, opts: WorldOptions = {}) {
     asks: [] as { question: string; options: string[] }[],
     logs: [] as { text: string; to: string }[],
     modelCalls: [] as any[],
+    commands: [] as any[],
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
     clock: undefined as any,
     $: undefined as any,
@@ -150,6 +152,7 @@ export function world(on: any, opts: WorldOptions = {}) {
   on("store.set", (_$: any, e: any) => ({ value: store.set(e.key, e.value) }));
   on("store.delete", (_$: any, e: any) => ({ value: store.delete(e.key) }));
   on("store.keys", () => ({ value: store.keys() }));
+  on("command.register", (_$: any, e: any) => ({ value: void seen.commands.push(e) }));
   on("ui.log", (_$: any, e: any) => ({ value: log(e.text, e.to) }));
   // $.ui.ask is a tool.call of AskUserQuestion.
   on("tool.call", async (_$: any, e: any) => {
