@@ -36,21 +36,23 @@ Notifications fire on wrap-up, stop, pause, resume, and keep-alive problems.
 
 ## Settings
 
-In `/config`, or under `pluginConfigs["last-call"].options` in settings.json:
+In `/config`, or under `pluginConfigs["last-call"].options` in settings.json. In `/config` every setting is a toggle or a list you pick from with the keyboard, with the default selected until you choose another value; only the handoff path is typed.
 
-| Setting | Default | |
-|---|---|---|
-| `autoResume` | `true` | Off: wait for `/last-call go` or your next prompt |
-| `wrapAtPercent` / `stopAtPercent` | `90` / `95` | 5-hour wrap-up and stop |
-| `sevenDayWrapAtPercent` / `sevenDayStopPercent` | `90` / `95` | 7-day wrap-up and stop |
-| `wrapLeadMinutes` | `10` | Also wrap up when the stop is projected this close |
-| `keepAlive` | `true` | Keep the cache warm while paused |
-| `keepAliveMinutes` | `55` | Minutes between pings (5–59) |
-| `keepAliveSessions` | `all` | `one`: only one session on this machine pings at a time |
-| `handoffPath` | `.claude/last-call/handoff.md` | Must stay inside the project |
-| `handoffGitIgnored` | `true` | Adds the note to `.git/info/exclude` (no tracked file changes) |
-| `coldResumeDefault` | `compact` | `compact`, `full` or `wait`, when nobody answers |
-| `coldResumeTimeoutMinutes` | `10` | How long the cold-resume question waits (1–120) |
+| Setting | Choices | Default | |
+|---|---|---|---|
+| `autoResume` | on / off | on | Off: wait for `/last-call go` or your next prompt |
+| `wrapAtPercent` / `stopAtPercent` | `70` `80` `85` `90` `95` / `85` `90` `95` `98` `100` | `90` / `95` | 5-hour wrap-up and stop |
+| `sevenDayWrapAtPercent` / `sevenDayStopPercent` | same as 5-hour | `90` / `95` | 7-day wrap-up and stop |
+| `wrapLeadMinutes` | `0` `5` `10` `15` `20` `30` | `10` | Also wrap up when the stop is projected this close |
+| `keepAlive` | on / off | on | Keep the cache warm while paused |
+| `keepAliveMinutes` | `15` `30` `45` `50` `55` | `55` | Minutes between pings |
+| `keepAliveSessions` | `all` `one` | `all` | `one`: only one session on this machine pings at a time |
+| `handoffPath` | any path | `.claude/last-call/handoff.md` | Must stay inside the project |
+| `handoffGitIgnored` | on / off | on | Adds the note to `.git/info/exclude` (no tracked file changes) |
+| `coldResumeDefault` | `compact` `full` `wait` | `compact` | When nobody answers |
+| `coldResumeTimeoutMinutes` | `1` `5` `10` `15` `30` `60` | `10` | How long the cold-resume question waits |
+
+A wrap-up picked above its stop is held to the stop.
 
 ## Limits
 
