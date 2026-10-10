@@ -9,6 +9,11 @@
       "name": "lessons-learned",
       "source": "./lessons-learned",
       "description": "Learns from your corrections: confirms each one, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session."
+    },
+    {
+      "name": "last-call",
+      "source": "./last-call",
+      "description": "Stops work at a clean point before the 5-hour (or 7-day) usage limit, keeps the prompt cache warm while waiting, and continues the work after the reset."
     }
   ]
 }

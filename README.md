@@ -11,6 +11,7 @@ claude plugin marketplace add Sunkanxx/Mods
 | Mod | What it does | Install |
 |---|---|---|
 | [lessons-learned](lessons-learned/README.md) | Learns from your corrections, recalls them when relevant, and turns repeated ones into rules. | `claude plugin install lessons-learned@sunkanxx-mods` |
+| [last-call](last-call/README.md) | Stops work at a clean point before the usage limit, keeps the cache warm while waiting, and continues after the reset. | `claude plugin install last-call@sunkanxx-mods` |
 
 ## Licence
 

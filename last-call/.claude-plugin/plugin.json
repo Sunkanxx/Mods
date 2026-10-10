@@ -1,0 +1,90 @@
+{
+  "name": "last-call",
+  "version": "0.1.0",
+  "description": "Stops work at a clean point before the 5-hour (or 7-day) usage limit, keeps the prompt cache warm while waiting, and continues the work after the reset.",
+  "author": { "name": "Sunkanxx" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "autoResume": {
+      "type": "boolean",
+      "title": "Resume automatically",
+      "description": "Continue the work by itself after the reset. Off: wait for /last-call go or your next prompt.",
+      "default": true
+    },
+    "wrapAtPercent": {
+      "type": "number",
+      "title": "5-hour wrap-up at (%)",
+      "description": "The 5-hour fill at which the model is told to find a clean stopping point.",
+      "default": 90
+    },
+    "stopAtPercent": {
+      "type": "number",
+      "title": "5-hour stop at (%)",
+      "description": "The 5-hour fill at which every tool but writing the handoff note is refused. The rest is the keep-alive reserve.",
+      "default": 95
+    },
+    "sevenDayWrapAtPercent": {
+      "type": "number",
+      "title": "7-day wrap-up at (%)",
+      "description": "The 7-day fill at which the model is told to find a clean stopping point.",
+      "default": 90
+    },
+    "sevenDayStopPercent": {
+      "type": "number",
+      "title": "7-day stop at (%)",
+      "description": "The 7-day fill at which work stops.",
+      "default": 95
+    },
+    "wrapLeadMinutes": {
+      "type": "number",
+      "title": "Wrap-up lead (minutes)",
+      "description": "Also start wrapping up when the burn rate projects the stop within this many minutes.",
+      "default": 10
+    },
+    "keepAlive": {
+      "type": "boolean",
+      "title": "Keep the cache warm",
+      "description": "While paused, ping the same model with the cached conversation, but only when that costs less than reloading it once.",
+      "default": true
+    },
+    "keepAliveMinutes": {
+      "type": "number",
+      "title": "Keep-alive interval (minutes)",
+      "description": "Minutes between keep-alive pings, 5 to 59 (the cache lives 60 minutes).",
+      "default": 55
+    },
+    "keepAliveSessions": {
+      "type": "string",
+      "title": "Keep-alive sessions",
+      "description": "all: every paused session pings its own cache. one: only one session on this machine pings at a time.",
+      "options": ["all", "one"],
+      "default": "all"
+    },
+    "handoffPath": {
+      "type": "string",
+      "title": "Handoff note path",
+      "description": "Where the model writes the handoff note, relative to the project root. Must stay inside the project.",
+      "default": ".claude/last-call/handoff.md"
+    },
+    "handoffGitIgnored": {
+      "type": "boolean",
+      "title": "Git-ignore the handoff note",
+      "description": "Add the note's path to the repository's local exclude file (.git/info/exclude). No tracked file is changed.",
+      "default": true
+    },
+    "coldResumeDefault": {
+      "type": "string",
+      "title": "Cold resume default",
+      "description": "When the cache has expired at resume and nobody answers: compact then resume, resume with the full context, or wait.",
+      "options": ["compact", "full", "wait"],
+      "default": "compact"
+    },
+    "coldResumeTimeoutMinutes": {
+      "type": "number",
+      "title": "Cold resume timeout (minutes)",
+      "description": "How long the cold-resume question waits for an answer before the default applies (1 to 120).",
+      "default": 10
+    }
+  }
+}
