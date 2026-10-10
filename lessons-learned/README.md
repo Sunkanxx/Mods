@@ -79,13 +79,13 @@ If you close a dialog without answering, the item is offered again at the next t
 
 ## Options
 
-Set in `/config`. Defaults apply until you save a value.
+Set in `/config`, where each option is a list you pick from with the keyboard; the default is selected until you choose another value.
 
-| Option | Default | Meaning |
-|---|---|---|
-| `model` | `haiku` | Model alias or id for the detector. |
-| `ruleCap` | `20` | Most rules kept per scope before you are asked to demote one. |
-| `maxRecall` | `3` | Most lessons attached to one prompt. |
+| Option | Choices | Default | Meaning |
+|---|---|---|---|
+| `model` | `haiku`, `sonnet`, `opus` | `haiku` | Model for the detector. |
+| `ruleCap` | `5`, `10`, `20`, `30`, `50` | `20` | Most rules kept per scope before you are asked to demote one. |
+| `maxRecall` | `1`, `2`, `3`, `5` | `3` | Most lessons attached to one prompt. |
 
 ## Privacy
 

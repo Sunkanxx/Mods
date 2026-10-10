@@ -24,6 +24,8 @@ const setUp = (on: any, o: WorldOptions & { lists?: Parameters<typeof filesWith>
 };
 const run = async ($: any, args = "") => ((await $.command.run({ command: "lessons", args } as any)) as any).text as string;
 const ids = (seen: any, path: string) => entriesOf(parseEntries(seen.files.get(path))).map((e: any) => e.id);
+// A scope at the smallest rule cap the config offers ("5"); G-001 is the least seen, so it is the first candidate.
+const FIVE_RULES = [entry("G-001", "Old rule"), ...["G-003", "G-004", "G-005", "G-006"].map((id) => entry(id, `Rule ${id}`, { seen: 2 }))];
 
 const reviewItem = (key: string, title: string, o: Record<string, unknown> = {}) => ({
   key, dismissed: 2, createdAt: "2026-10-08", repoRoot: null,
@@ -79,14 +81,14 @@ test("promote moves a lesson to rules, case-insensitively", async ($: any, on: a
   expect(entriesOf(parseEntries(seen.files.get(R.rules)!))[0].seen).toBe(2);
 });
 
-test("promote at the cap asks which rule goes back", { options: { ruleCap: 1 } } as any, async ($: any, on: any) => {
+test("promote at the cap asks which rule goes back", { options: { ruleCap: "5" } } as any, async ($: any, on: any) => {
   const seen = setUp(on, {
-    lists: { gr: [entry("G-001", "Old rule")], gl: [entry("G-002", "New lesson")] },
+    lists: { gr: FIVE_RULES, gl: [entry("G-002", "New lesson")] },
     asks: ["G-001 Old rule"],
   });
   expect(await run($, "promote G-002")).toBe("Promoted G-002 to a rule.");
   expect(seen.asks).toHaveLength(1);
-  expect(ids(seen, G.rules)).toEqual(["G-002"]);
+  expect(ids(seen, G.rules).sort()).toEqual(["G-002", "G-003", "G-004", "G-005", "G-006"]);
   expect(ids(seen, G.lessons)).toEqual(["G-001"]);
 });
 
@@ -213,9 +215,9 @@ const turnEnd = async ($: any, seen: any) => {
 };
 const GLOBAL_ONLY = { [G.lessons]: fileOf("lessons", [entry("G-002", "Quote it")]), [G.rules]: fileOf("rules"), [G.md]: insertBlock(null, "rules-learned.md") };
 
-test("while a turn-end dialog is open, /lessons delete, promote at the cap and setup do not ask", { options: { ruleCap: 1 } } as any, async ($: any, on: any) => {
+test("while a turn-end dialog is open, /lessons delete, promote at the cap and setup do not ask", { options: { ruleCap: "5" } } as any, async ($: any, on: any) => {
   const seen = setUp(on, {
-    files: { ...GLOBAL_ONLY, [G.rules]: fileOf("rules", [entry("G-001", "Old rule")]) },
+    files: { ...GLOBAL_ONLY, [G.rules]: fileOf("rules", FIVE_RULES) },
     store: { queue: [queuedGlobal] },
     asks: [{ answer: "Skip", delay: 1000 }],
   });
