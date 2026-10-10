@@ -49,12 +49,19 @@ test("uses touched paths", async ($: any, on: any) => {
   expect(out.context).toEqual([block(lesson)]);
 });
 
-test("at most maxRecall", { options: { maxRecall: 2 } } as any, async ($: any, on: any) => {
+test("at most maxRecall", { options: { maxRecall: "2" } } as any, async ($: any, on: any) => {
   const gl = ["G-001", "G-002", "G-003"].map((id) => entry(id, id));
   setUp(on, { files: filesWith({ gl }) });
   const out = await submit($, "powershell quoting");
   expect(out.context).toHaveLength(1);
   expect(out.context[0].split("\n")).toHaveLength(1 + 2);
+});
+
+test("a recall limit outside the offered options falls back to the default 3", { options: { maxRecall: "7" } } as any, async ($: any, on: any) => {
+  const gl = ["G-001", "G-002", "G-003", "G-004"].map((id) => entry(id, id));
+  setUp(on, { files: filesWith({ gl }) });
+  const out = await submit($, "powershell quoting");
+  expect(out.context[0].split("\n")).toHaveLength(1 + 3);
 });
 
 test("no repeat within a session", async ($: any, on: any) => {

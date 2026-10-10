@@ -289,13 +289,15 @@ Pure functions over file text, plus one writer.
 
 ## 6. Configuration (`userConfig`, set via `/config`)
 
-| Key | Default | Meaning |
-|---|---|---|
-| `model` | `haiku` | model alias or id for the detector |
-| `ruleCap` | `20` | maximum rules per scope |
-| `maxRecall` | `3` | maximum lessons attached per prompt |
+| Key | Choices | Default | Meaning |
+|---|---|---|---|
+| `model` | `haiku`, `sonnet`, `opus` | `haiku` | model for the detector |
+| `ruleCap` | `5`, `10`, `20`, `30`, `50` | `20` | maximum rules per scope |
+| `maxRecall` | `1`, `2`, `3`, `5` | `3` | maximum lessons attached per prompt |
 
-Defaults live in code: a `userConfig` value only reaches the mod once the user has saved one.
+Each key is a `string` field with `options`, so `/config` draws it as a picker with the default selected,
+and a stored value outside the list counts as unset (the default applies). The numbers arrive as strings;
+`register` converts them with `Number()`, keeping the same defaults in code as a fallback.
 
 ## 7. Safety
 
