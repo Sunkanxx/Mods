@@ -179,21 +179,25 @@ Commands:
 - `rearm`: turn it back on
 - `ping`: send one keep-alive now and report how much the cache served
 
-| Setting | Default |
-|---|---|
-| autoResume | true |
-| wrapAtPercent (5h) | 90 |
-| stopAtPercent (5h) | 95 |
-| sevenDayWrapAtPercent | 90 |
-| sevenDayStopPercent | 95 |
-| wrapLeadMinutes | 10 |
-| keepAlive | true |
-| keepAliveMinutes | 55 (capped below 60) |
-| keepAliveSessions | all (or one) |
-| handoffPath | `.claude/last-call/handoff.md` |
-| handoffGitIgnored | true |
-| coldResumeDefault | compact (or full, wait) |
-| coldResumeTimeoutMinutes | 10 |
+| Setting | Choices | Default |
+|---|---|---|
+| autoResume | true / false | true |
+| wrapAtPercent (5h) | 70, 80, 85, 90, 95 | 90 |
+| stopAtPercent (5h) | 85, 90, 95, 98, 100 | 95 |
+| sevenDayWrapAtPercent | 70, 80, 85, 90, 95 | 90 |
+| sevenDayStopPercent | 85, 90, 95, 98, 100 | 95 |
+| wrapLeadMinutes | 0, 5, 10, 15, 20, 30 | 10 |
+| keepAlive | true / false | true |
+| keepAliveMinutes | 15, 30, 45, 50, 55 | 55 (capped below 60) |
+| keepAliveSessions | all, one | all |
+| handoffPath | free text | `.claude/last-call/handoff.md` |
+| handoffGitIgnored | true / false | true |
+| coldResumeDefault | compact, full, wait | compact |
+| coldResumeTimeoutMinutes | 1, 5, 10, 15, 30, 60 | 10 |
+
+The number settings are `string` fields with `options`, so `/config` draws each as a picker with its default
+selected; `configFrom` converts them back to numbers (a number stored before 0.1.1 still counts) and keeps
+its ranges and the wrap-up ≤ stop rule.
 
 ## 12. Distribution
 

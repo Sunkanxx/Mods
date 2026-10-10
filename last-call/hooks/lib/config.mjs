@@ -17,8 +17,13 @@ export const DEFAULTS = {
   coldResumeTimeoutMinutes: 10,
 };
 
-const clamp = (value, min, max, fallback) =>
-  Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+// The number settings are /config pickers, so they arrive as strings ("90"); a number
+// stored before they were pickers still counts.
+const toNumber = (value) => (typeof value === "string" && value.trim() !== "" ? Number(value) : value);
+const clamp = (value, min, max, fallback) => {
+  const n = toNumber(value);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
 const oneOf = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback);
 const flag = (value, fallback) => (typeof value === "boolean" ? value : fallback);
 

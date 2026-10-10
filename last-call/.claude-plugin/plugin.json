@@ -1,6 +1,6 @@
 {
   "name": "last-call",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Stops work at a clean point before the 5-hour (or 7-day) usage limit, keeps the prompt cache warm while waiting, and continues the work after the reset.",
   "author": { "name": "Sunkanxx" },
   "license": "MIT",
@@ -13,34 +13,39 @@
       "default": true
     },
     "wrapAtPercent": {
-      "type": "number",
+      "type": "string",
       "title": "5-hour wrap-up at (%)",
       "description": "The 5-hour fill at which the model is told to find a clean stopping point.",
-      "default": 90
+      "options": ["70", "80", "85", "90", "95"],
+      "default": "90"
     },
     "stopAtPercent": {
-      "type": "number",
+      "type": "string",
       "title": "5-hour stop at (%)",
       "description": "The 5-hour fill at which every tool but writing the handoff note is refused. The rest is the keep-alive reserve.",
-      "default": 95
+      "options": ["85", "90", "95", "98", "100"],
+      "default": "95"
     },
     "sevenDayWrapAtPercent": {
-      "type": "number",
+      "type": "string",
       "title": "7-day wrap-up at (%)",
       "description": "The 7-day fill at which the model is told to find a clean stopping point.",
-      "default": 90
+      "options": ["70", "80", "85", "90", "95"],
+      "default": "90"
     },
     "sevenDayStopPercent": {
-      "type": "number",
+      "type": "string",
       "title": "7-day stop at (%)",
       "description": "The 7-day fill at which work stops.",
-      "default": 95
+      "options": ["85", "90", "95", "98", "100"],
+      "default": "95"
     },
     "wrapLeadMinutes": {
-      "type": "number",
+      "type": "string",
       "title": "Wrap-up lead (minutes)",
       "description": "Also start wrapping up when the burn rate projects the stop within this many minutes.",
-      "default": 10
+      "options": ["0", "5", "10", "15", "20", "30"],
+      "default": "10"
     },
     "keepAlive": {
       "type": "boolean",
@@ -49,10 +54,11 @@
       "default": true
     },
     "keepAliveMinutes": {
-      "type": "number",
+      "type": "string",
       "title": "Keep-alive interval (minutes)",
-      "description": "Minutes between keep-alive pings, 5 to 59 (the cache lives 60 minutes).",
-      "default": 55
+      "description": "Minutes between keep-alive pings (the cache lives 60 minutes).",
+      "options": ["15", "30", "45", "50", "55"],
+      "default": "55"
     },
     "keepAliveSessions": {
       "type": "string",
@@ -81,10 +87,11 @@
       "default": "compact"
     },
     "coldResumeTimeoutMinutes": {
-      "type": "number",
+      "type": "string",
       "title": "Cold resume timeout (minutes)",
-      "description": "How long the cold-resume question waits for an answer before the default applies (1 to 120).",
-      "default": 10
+      "description": "How long the cold-resume question waits for an answer before the default applies.",
+      "options": ["1", "5", "10", "15", "30", "60"],
+      "default": "10"
     }
   }
 }
