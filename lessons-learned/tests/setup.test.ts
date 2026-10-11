@@ -32,7 +32,8 @@ test("creates global files and block on first start", async ($: any, on: any) =>
     [G.md]: insertBlock(null, "rules-learned.md"),
   });
   expect(seen.asks).toEqual([]);
-  expect([...seen.store.keys()]).toEqual([]);
+  // Only the record that this session has started (no setup answer, nothing queued).
+  expect([...seen.store.keys()]).toEqual(["offeredSessions"]);
 });
 
 test("respects CLAUDE_CONFIG_DIR", async ($: any, on: any) => {

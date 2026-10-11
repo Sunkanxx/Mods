@@ -50,15 +50,15 @@ test("asks once at session start when items wait", async ($: any, on: any) => {
   await start($, seen);
   expect(seen.asks).toEqual([{ question: question(2), options: ["Review now", "Later", "Discard all"] }]);
   expect(seen.headers).toEqual(["Lesson"]);
-  expect(seen.store.get("offeredSession")).toBe("s1");
+  expect(seen.store.get("offeredSessions")).toEqual(["s1"]);
   expect(seen.statuses.at(-1)).toBe("lessons: 2 to review");
 });
 
-test("nothing waiting: no question", async ($: any, on: any) => {
+test("nothing waiting: no question, the session still counts as started", async ($: any, on: any) => {
   const seen = setUp(on);
   await start($, seen);
   expect(seen.asks).toEqual([]);
-  expect(seen.store.has("offeredSession")).toBe(false);
+  expect(seen.store.get("offeredSessions")).toEqual(["s1"]);
   expect(seen.statuses.at(-1)).toBeUndefined();
 });
 
@@ -90,7 +90,7 @@ test("Later keeps them", async ($: any, on: any) => {
   const seen = setUp(on, { store: { queue: [item("a:1")] }, asks: ["Later"] });
   await start($, seen);
   expect(keys(seen)).toEqual(["a:1"]);
-  expect(seen.store.get("offeredSession")).toBe("s1");
+  expect(seen.store.get("offeredSessions")).toEqual(["s1"]);
   expect(seen.writes.filter((w) => w.path === G.lessons)).toEqual([]);
 });
 
@@ -100,7 +100,7 @@ test("a dismissed question keeps them", async ($: any, on: any) => {
   expect(seen.asks).toHaveLength(1);
   expect(keys(seen)).toEqual(["a:1"]);
   expect((seen.store.get("queue") as any[])[0].dismissed).toBe(0);
-  expect(seen.store.get("offeredSession")).toBe("s1");
+  expect(seen.store.get("offeredSessions")).toEqual(["s1"]);
 });
 
 test("Discard all leaves another repo's items", async ($: any, on: any) => {
@@ -113,17 +113,17 @@ test("Discard all leaves another repo's items", async ($: any, on: any) => {
 });
 
 test("reload in the same session does not ask again", async ($: any, on: any) => {
-  const seen = setUp(on, { store: { queue: [item("a:1")], offeredSession: "s1" }, asks: ["Later"] });
+  const seen = setUp(on, { store: { queue: [item("a:1")], offeredSessions: ["s0", "s1", "s2"] }, asks: ["Later"] });
   await start($, seen);
   expect(seen.asks).toEqual([]);
   expect(seen.statuses.at(-1)).toBe("lessons: 1 to review");
 });
 
 test("a new session asks again", async ($: any, on: any) => {
-  const seen = setUp(on, { sessionId: "s2", store: { queue: [item("a:1")], offeredSession: "s1" }, asks: ["Later"] });
+  const seen = setUp(on, { sessionId: "s2", store: { queue: [item("a:1")], offeredSessions: ["s1"] }, asks: ["Later"] });
   await start($, seen);
   expect(seen.asks).toHaveLength(1);
-  expect(seen.store.get("offeredSession")).toBe("s2");
+  expect(seen.store.get("offeredSessions")).toEqual(["s1", "s2"]);
 });
 
 for (const askAt of ["never", "turn end"]) {
@@ -139,7 +139,7 @@ test("no surfaces: no question, nothing recorded", async ($: any, on: any) => {
   const seen = setUp(on, { surfaces: [], store: { queue: [item("a:1")] }, asks: ["Later"] });
   await start($, seen);
   expect(seen.asks).toEqual([]);
-  expect(seen.store.has("offeredSession")).toBe(false);
+  expect(seen.store.has("offeredSessions")).toBe(false);
 });
 
 test("only another repo's items: no question", async ($: any, on: any) => {
@@ -155,13 +155,13 @@ test("setup question first, review question after it", async ($: any, on: any) =
   expect(seen.asks.map((a) => a.question)).toEqual([SETUP_QUESTION, question(1)]);
 });
 
-test("a dialog already open: the question is not asked and not recorded", async ($: any, on: any) => {
+test("a dialog already open: the question is not asked, and not later either", async ($: any, on: any) => {
   const seen = setUp(on, { store: { queue: [item("a:1")] }, asks: [{ answer: "Skip", delay: 1000 }] });
   const reviewing = $.command.run({ command: "lessons", args: "review" } as any);
   await seen.clock.advance(0);
   await start($, seen);
   expect(seen.asks).toHaveLength(1);
-  expect(seen.store.has("offeredSession")).toBe(false);
+  expect(seen.store.get("offeredSessions")).toEqual(["s1"]);
   await seen.clock.advance(1000);
   await reviewing;
 });
@@ -186,4 +186,20 @@ test("an item queued by 0.1.x has no mistake line", async ($: any, on: any) => {
   const seen = setUp(on, { store: { queue: [old] }, asks: ["Review now", "Skip"] });
   await start($, seen);
   expect(seen.asks[1].question.startsWith('Lesson (global): "Lesson a:1"')).toBe(true);
+});
+
+test("a reload after a start with nothing waiting does not ask mid-session", async ($: any, on: any) => {
+  const seen = setUp(on, { asks: ["Later"] });
+  await start($, seen);
+  seen.store.set("queue", [item("a:1")]);
+  await start($, seen);
+  expect(seen.asks).toEqual([]);
+  expect(seen.statuses.at(-1)).toBe("lessons: 1 to review");
+});
+
+test("the started sessions list keeps the last 20", async ($: any, on: any) => {
+  const earlier = Array.from({ length: 20 }, (_, i) => `e${i}`);
+  const seen = setUp(on, { store: { offeredSessions: earlier } });
+  await start($, seen);
+  expect(seen.store.get("offeredSessions")).toEqual([...earlier.slice(1), "s1"]);
 });

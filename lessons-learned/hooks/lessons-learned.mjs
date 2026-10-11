@@ -19,7 +19,9 @@ import { HEADER, dialogFor, interpret, onDismiss, capDialog, interpretCap, offer
 export const KEY_QUEUE = "queue";
 // 0.1.x only: read once at session start and folded into the queue (spec §4.4).
 export const KEY_REVIEW = "review";
-export const KEY_OFFERED = "offeredSession";
+export const KEY_STARTED = "offeredSessions";
+// Session ids kept in KEY_STARTED: enough for every session open side by side.
+const SESSIONS_KEPT = 20;
 export const optOutKey = (root) => `optOut:${root}`;
 
 const SETUP_QUESTION =
@@ -170,7 +172,7 @@ async function startLater($) {
   try {
     await migrateReview($);
     await refreshStatus($);
-    if (cfg.askAt === "session start") await offerReview($);
+    if ((await firstStart($)) && cfg.askAt === "session start") await offerReview($);
   } catch (err) {
     debug($, `review question failed: ${err?.message ?? err}`);
   }
@@ -489,17 +491,27 @@ async function migrateReview($) {
   await $.store.delete(KEY_REVIEW);
 }
 
-// Once per session id (a module reload asks nothing new), and only when someone can answer
-// and this session can take an item. Not asked, and not recorded, while a dialog is open.
-async function offerReview($) {
-  if ((await $.session.surfaces()).length === 0) return;
+// True at the first start of a session someone can answer, recorded whether or not anything
+// waits: session.start fires again on a module reload (/reload-plugins, an update), and that
+// must not ask mid-session. The last SESSIONS_KEPT ids are kept, so sessions open side by side
+// do not undo each other's record.
+async function firstStart($) {
+  if ((await $.session.surfaces()).length === 0) return false;
   const sessionId = String(await $.session.id());
-  if ((await $.store.get(KEY_OFFERED)) === sessionId) return;
+  const stored = await $.store.get(KEY_STARTED);
+  const started = Array.isArray(stored) ? stored : [];
+  if (started.includes(sessionId)) return false;
+  await $.store.set(KEY_STARTED, [...started, sessionId].slice(-SESSIONS_KEPT));
+  return true;
+}
+
+// The one question about the items this session can take. Skipped when another dialog of
+// this mod is open; the items wait for /lessons review or the next session.
+async function offerReview($) {
   const result = await withAsk(async () => {
     const ctx = await context($);
     const items = (await readList($, KEY_QUEUE)).filter((i) => offerable(i, ctx.repoRoot));
     if (items.length === 0) return;
-    await $.store.set(KEY_OFFERED, sessionId);
     const q = reviewQuestion(items.length);
     const answer = await ask($, q.question, q.options, "review question");
     if (answer === REVIEW_NOW) {

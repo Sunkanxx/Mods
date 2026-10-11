@@ -111,8 +111,10 @@ Git Bash rewrites `/cmd` into a path, so run slash commands in `claude -p` from 
   `askAt = turn end` — at turn ends; an item tied to a repo only in a session of that repo.
 - `review`: the 0.1.x list of items dismissed twice. Read once at session start, moved into
   `queue` (cap applied) and deleted; nothing writes it any more.
-- `offeredSession`: the session id the session-start question was last asked in, so a module
-  reload (`/reload-plugins`, an update) in the same session does not ask again.
+- `offeredSessions`: the ids of the last 20 sessions that started with someone to answer,
+  recorded at a session's first start whether or not anything waits, so a module reload
+  (`/reload-plugins`, an update) later in the same session never asks, and sessions open side
+  by side do not undo each other's record.
 
 Session-only (memory): ids already recalled this session, recently touched paths, capture
 paused flag.
@@ -224,7 +226,8 @@ earlier correction. Review it now?"*) with `Review now` · `Later` · `Discard a
 - **Discard all** removes every item this session can take; nothing is written to the files.
 
 It is asked after project setup (§5.1), in the same deferred step, and at most once per session
-id (`offeredSession`), so a module reload does not ask again. Not asked when nobody can answer.
+id (`offeredSessions`, recorded at the first start even when nothing waits), so a module
+reload does not ask mid-session. Not asked while another dialog of this mod is open. Not asked when nobody can answer.
 
 **The item dialog.** A queued project-scope item is only offered in a session of that repo; so
 is a repeat of a `P-` entry, whatever scope the detector gave (it is stored as project scope),
@@ -375,7 +378,7 @@ points to "keep out of git".
 | Turn interrupted (Esc) | queue kept (with `askAt = turn end`: offered at the next turn end) |
 | Detector reply without `mistake` | no correction; nothing queued |
 | Items queued or reviewed by 0.1.x | `review` items move into `queue` at session start; items without `mistake` are offered without the "You corrected" line |
-| Module reloaded mid-session | the session-start question is not asked again (`offeredSession`) |
+| Module reloaded mid-session | the session-start question is not asked (`offeredSessions`), even if items were queued since the start |
 | Hand-edited or malformed files | unparseable blocks kept verbatim; ids continue from the highest |
 | Files deleted by hand | recreated (empty, with header) at the next session start |
 | Block removed from `CLAUDE.md` by hand | global: re-inserted; project: treated as not set up, setup asks again |
