@@ -109,7 +109,7 @@ test("attaches promoted rules once", async ($: any, on: any) => {
   const seen = setUp(on, {
     files: filesWith({ pl: [lesson] }),
     messages: [{ role: "assistant", text: "Ran it in Git Bash.", toolUses: [] }],
-    model: [JSON.stringify({ correction: true, title: "Use PowerShell", body: "Body.", tags: ["alpha", "beta"], scope: "project", repeatOf: "P-004" })],
+    model: [JSON.stringify({ correction: true, mistake: "Ran it in Git Bash.", title: "Use PowerShell", body: "Body.", tags: ["alpha", "beta"], scope: "project", repeatOf: "P-004" })],
     asks: ["Promote to rule"],
   });
   await submit($, "no, use PowerShell");

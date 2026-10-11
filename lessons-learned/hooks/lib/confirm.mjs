@@ -8,7 +8,8 @@ function other(scope) {
   return scope === "global" ? "project" : "global";
 }
 
-function truncate(text, max) {
+// Cut to max code points, "…" appended when cut.
+export function truncate(text, max) {
   const chars = Array.from(text);
   return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
 }
@@ -23,8 +24,13 @@ function tagsText(tags) {
 // now) and also shows the new lesson's title and tags: Save as new, text typed under Other
 // and the fallback for a target gone meanwhile all save a new lesson under them.
 export function dialogFor(item, ctx) {
-  const d = item.detection;
-  const target = ctx.target;
+  const dialog = baseDialog(item.detection, ctx.target, ctx.projectAvailable);
+  // Items queued by 0.1.x have no mistake; their question starts with the rest.
+  const mistake = item.detection.mistake;
+  return typeof mistake === "string" && mistake ? { ...dialog, question: `You corrected: ${mistake} — ${dialog.question}` } : dialog;
+}
+
+function baseDialog(d, target, projectAvailable) {
   const titled = `"${d.title}"${tagsText(d.tags)}`;
   const asNew = `(as a new ${d.scope} lesson: ${titled}).`;
   if (target && d.repeatKind === "lesson") {
@@ -44,7 +50,7 @@ export function dialogFor(item, ctx) {
     };
   }
   const options = ["Save"];
-  if (ctx.projectAvailable) options.push(d.scope === "global" ? "Save to project" : "Save as global");
+  if (projectAvailable) options.push(d.scope === "global" ? "Save to project" : "Save as global");
   options.push("Skip");
   return {
     kind: "new",

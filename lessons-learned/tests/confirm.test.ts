@@ -152,3 +152,18 @@ test("every dialog shows the tags a save would write, and none when there are no
   }
   expect(dialogFor(item({}, { tags: [] }), ctx).question).toBe('Lesson (project): "Use PowerShell" — Run it in PowerShell. Save it?');
 });
+
+test("dialog starts with the mistake", () => {
+  const prefix = "You corrected: ran it in Git Bash — ";
+  const m = { mistake: "ran it in Git Bash" };
+  expect(dialogFor(item({}, m), ctx).question.startsWith(prefix + "Lesson (")).toBe(true);
+  const lesson = item({}, { ...m, repeatOf: "P-012", repeatKind: "lesson" });
+  expect(dialogFor(lesson, { ...ctx, target: entry("P-012", "X") }).question.startsWith(prefix + "Looks like a repeat")).toBe(true);
+  const rule = item({}, { ...m, repeatOf: "P-003", repeatKind: "rule" });
+  expect(dialogFor(rule, { ...ctx, target: entry("P-003", "X") }).question.startsWith(prefix + "Rule P-003")).toBe(true);
+});
+
+test("an item without mistake has no prefix", () => {
+  expect(dialogFor(item(), ctx).question.startsWith("Lesson (")).toBe(true);
+  expect(dialogFor(item({}, { mistake: "" }), ctx).question.startsWith("Lesson (")).toBe(true);
+});

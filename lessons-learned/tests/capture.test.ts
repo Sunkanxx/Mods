@@ -38,8 +38,11 @@ const PROMPT = "no, use PowerShell for slash commands";
 const TITLE = "Use PowerShell for slash commands";
 const BODY = "Git Bash rewrites /cmd into a path.";
 const TAGS = ["powershell", "slash commands"];
+const MISTAKE = "Ran the command in Git Bash.";
+// Every question about a detection starts by naming the mistake.
+const YOU = `You corrected: ${MISTAKE} — `;
 const detected = (o: Record<string, unknown> = {}) =>
-  JSON.stringify({ correction: true, title: TITLE, body: BODY, tags: TAGS, scope: "project", repeatOf: null, ...o });
+  JSON.stringify({ correction: true, mistake: MISTAKE, title: TITLE, body: BODY, tags: TAGS, scope: "project", repeatOf: null, ...o });
 
 const setUp = (on: any, o: WorldOptions = {}) =>
   world(on, { files: filesWith(), repo: { root: REPO }, messages: MESSAGES, ...o });
@@ -68,7 +71,7 @@ const queued = (key: string, o: Record<string, unknown> = {}, d: Record<string, 
 // A repeat dialog also shows the new lesson that Save as new or typed text would write.
 const TAGS_TEXT = `[tags: ${TAGS.join(", ")}]`;
 const AS_NEW = `(as a new project lesson: "${TITLE}" ${TAGS_TEXT}).`;
-const NEW_QUESTION = `Lesson (project): "${TITLE}" ${TAGS_TEXT} — ${BODY} Save it?`;
+const NEW_QUESTION = `${YOU}Lesson (project): "${TITLE}" ${TAGS_TEXT} — ${BODY} Save it?`;
 const GLOBAL_A1 = 'Lesson (global): "Lesson a:1" [tags: alpha, beta] — Why it matters. Save it?';
 const GLOBAL_A2 = 'Lesson (global): "Lesson a:2" [tags: alpha, beta] — Why it matters. Save it?';
 const debugOnly = (seen: any) => seen.logs.every((l: any) => l.to === "debug");
@@ -182,6 +185,8 @@ test("saves on Save", async ($: any, on: any) => {
   expect(entriesIn(seen, R.lessons)).toEqual([
     { id: "P-001", title: TITLE, tags: TAGS, seen: 1, first: TODAY, last: TODAY, body: BODY },
   ]);
+  // The mistake is shown in the dialog only, never written to a file (spec §7).
+  expect(seen.writes.some((w: any) => w.text.includes(MISTAKE))).toBe(false);
   expect(seen.store.get("queue")).toEqual([]);
 });
 
@@ -252,7 +257,7 @@ test("non-ASCII text is saved unchanged", async ($: any, on: any) => {
   const body = "Git Bash spremeni /ukaz v pot — čšž.";
   const seen = setUp(on, { model: [detected({ title, body, tags: ["šumniki", "ukazi"] })], asks: ["Save"] });
   await turn($, seen, "ne, uporabi PowerShell — čšž");
-  expect(seen.asks[0].question).toBe(`Lesson (project): "${title}" [tags: šumniki, ukazi] — ${body} Save it?`);
+  expect(seen.asks[0].question).toBe(`${YOU}Lesson (project): "${title}" [tags: šumniki, ukazi] — ${body} Save it?`);
   const [saved] = entriesIn(seen, R.lessons);
   expect([saved.title, saved.body, saved.tags]).toEqual([title, body, ["šumniki", "ukazi"]]);
 });
@@ -260,7 +265,7 @@ test("non-ASCII text is saved unchanged", async ($: any, on: any) => {
 test("a global detection outside a repo offers no project option", async ($: any, on: any) => {
   const seen = setUp(on, { repo: null, model: [detected({ scope: "global" })], asks: ["Save"] });
   await turn($, seen);
-  expect(seen.asks[0]).toEqual({ question: `Lesson (global): "${TITLE}" ${TAGS_TEXT} — ${BODY} Save it?`, options: ["Save", "Skip"] });
+  expect(seen.asks[0]).toEqual({ question: `${YOU}Lesson (global): "${TITLE}" ${TAGS_TEXT} — ${BODY} Save it?`, options: ["Save", "Skip"] });
   expect(entriesIn(seen, G.lessons).map((e: any) => e.id)).toEqual(["G-001"]);
 });
 
@@ -271,7 +276,7 @@ test("promotes a repeat", async ($: any, on: any) => {
   const seen = setUp(on, { files: filesWith({ pl: [lesson] }), model: [detected({ repeatOf: "P-004" })], asks: ["Promote to rule"] });
   await turn($, seen);
   expect(seen.asks).toEqual([{
-    question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`,
+    question: `${YOU}Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`,
     options: ["Promote to rule", "Save as new", "Skip"],
   }]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
@@ -357,7 +362,7 @@ test("notes a broken rule", async ($: any, on: any) => {
   const seen = setUp(on, { files: filesWith({ pr: [rule] }), model: [detected({ repeatOf: "P-003" })], asks: ["Note it"] });
   await turn($, seen);
   expect(seen.asks).toEqual([{
-    question: `Rule P-003 "Run tests before committing" was broken again — ${BODY} ${AS_NEW} Note it?`,
+    question: `${YOU}Rule P-003 "Run tests before committing" was broken again — ${BODY} ${AS_NEW} Note it?`,
     options: ["Note it", "Skip"],
   }]);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...rule, seen: 3, last: TODAY }]);
@@ -507,7 +512,7 @@ test("the queue item key is the session id and turn count", async ($: any, on: a
   await seen.clock.settle();
   expect(seen.store.get("queue")).toEqual([{
     key: "abc:7",
-    detection: { title: TITLE, body: BODY, tags: TAGS, scope: "project", repeatOf: null, repeatKind: null },
+    detection: { mistake: MISTAKE, title: TITLE, body: BODY, tags: TAGS, scope: "project", repeatOf: null, repeatKind: null },
     repoRoot: REPO,
     dismissed: 0,
     createdAt: TODAY,
@@ -517,7 +522,7 @@ test("the queue item key is the session id and turn count", async ($: any, on: a
 // ---------- confirm: a repeat whose target moved, a project repeat, a dismissed cap dialog ----------
 
 const repeatOfP004 = (key: string, kind = "lesson") =>
-  queued(key, { repoRoot: REPO }, { title: TITLE, body: BODY, tags: TAGS, scope: "project", repeatOf: "P-004", repeatKind: kind });
+  queued(key, { repoRoot: REPO }, { mistake: MISTAKE, title: TITLE, body: BODY, tags: TAGS, scope: "project", repeatOf: "P-004", repeatKind: kind });
 
 test("two queued repeats of one lesson: the second notes the rule the first promoted", async ($: any, on: any) => {
   const lesson = entry("P-004", "Use PowerShell");
@@ -529,8 +534,8 @@ test("two queued repeats of one lesson: the second notes the rule the first prom
   await turnEnd($, seen);
   await turnEnd($, seen);
   expect(seen.asks).toEqual([
-    { question: `Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`, options: ["Promote to rule", "Save as new", "Skip"] },
-    { question: `Rule P-004 "Use PowerShell" was broken again — ${BODY} ${AS_NEW} Note it?`, options: ["Note it", "Skip"] },
+    { question: `${YOU}Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`, options: ["Promote to rule", "Save as new", "Skip"] },
+    { question: `${YOU}Rule P-004 "Use PowerShell" was broken again — ${BODY} ${AS_NEW} Note it?`, options: ["Note it", "Skip"] },
   ]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
@@ -557,7 +562,7 @@ test("a repeat of a rule that was demoted is asked as a repeat of the lesson", a
   const lesson = entry("P-004", "Use PowerShell", { seen: 2 });
   const seen = setUp(on, { files: filesWith({ pl: [lesson] }), store: { queue: [repeatOfP004("a:1", "rule")] }, asks: ["Promote to rule"] });
   await turnEnd($, seen);
-  expect(seen.asks[0].question).toBe(`Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`);
+  expect(seen.asks[0].question).toBe(`${YOU}Looks like a repeat of P-004 "Use PowerShell" — ${BODY} ${AS_NEW} Promote it to a rule?`);
   expect(entriesIn(seen, R.rules)).toEqual([{ ...lesson, seen: 3, last: TODAY }]);
   expect(entriesIn(seen, R.lessons)).toEqual([]);
 });

@@ -5,11 +5,12 @@ import {
   shouldSkip,
   buildDetectorPrompt,
   parseDetectorReply,
+  MISTAKE_MAX,
 } from "../hooks/lib/detector.mjs";
 
 const base = { prompt: "no, use X", hasPreviousReply: true, paused: false, hasSurfaces: true, originKind: "composer" };
 const ctx = { known: new Map([["P-012", "lesson"], ["G-003", "rule"]]), projectSetUp: true };
-const good = { correction: true, title: "Use PowerShell", body: "Git Bash rewrites paths.", tags: ["PowerShell", "claude p"], scope: "global", repeatOf: null };
+const good = { correction: true, mistake: "Ran it in Git Bash.", title: "Use PowerShell", body: "Git Bash rewrites paths.", tags: ["PowerShell", "claude p"], scope: "global", repeatOf: null };
 
 test("shouldSkip: plain composer prompt is not skipped", () => {
   expect(shouldSkip(base)).toBe(false);
@@ -75,7 +76,7 @@ test("parseDetectorReply: no correction", () => {
 test("parseDetectorReply: valid correction is cleaned", () => {
   const d = parseDetectorReply(JSON.stringify({ ...good, title: "## Use  PowerShell", tags: ["PowerShell", "@claude p", "code"] }), ctx);
   // "@claude p" is dropped, not repaired: a tag is kept only as the detector wrote it.
-  expect(d).toEqual({ title: "Use PowerShell", body: "Git Bash rewrites paths.", tags: ["powershell"], scope: "global", repeatOf: null, repeatKind: null });
+  expect(d).toEqual({ mistake: "Ran it in Git Bash.", title: "Use PowerShell", body: "Git Bash rewrites paths.", tags: ["powershell"], scope: "global", repeatOf: null, repeatKind: null });
 });
 
 test("parseDetectorReply: fenced and surrounded JSON", () => {
@@ -113,4 +114,26 @@ test("parseDetectorReply: instruction-like tags are dropped", () => {
 
 test("parseDetectorReply: all-generic tags still offered", () => {
   expect(parseDetectorReply(JSON.stringify({ ...good, tags: ["code", "fix"] }), ctx)?.tags).toEqual([]);
+});
+
+test("a reply without mistake is no correction", () => {
+  const { mistake, ...noMistake } = good;
+  expect(parseDetectorReply(JSON.stringify(noMistake), ctx)).toBeNull();
+  expect(parseDetectorReply(JSON.stringify({ ...good, mistake: "  " }), ctx)).toBeNull();
+  expect(parseDetectorReply(JSON.stringify({ ...good, mistake: 7 }), ctx)).toBeNull();
+});
+
+test("mistake is cleaned and cut", () => {
+  expect(MISTAKE_MAX).toBe(160);
+  const d = parseDetectorReply(JSON.stringify({ ...good, mistake: "Imported\n @evil.md here" }), ctx);
+  expect(d?.mistake).toBe("Imported ＠evil.md here");
+  const long = parseDetectorReply(JSON.stringify({ ...good, mistake: "x".repeat(300) }), ctx);
+  expect(Array.from(long!.mistake)).toHaveLength(161);
+  expect(long!.mistake).toBe("x".repeat(160) + "…");
+});
+
+test("the prompt names the new rules", () => {
+  for (const t of ["name the mistake", "When unsure", "feature requests", '"mistake"']) {
+    expect(DETECTOR_SYSTEM).toContain(t);
+  }
 });
