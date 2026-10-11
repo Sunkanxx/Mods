@@ -1,5 +1,5 @@
 import { test, expect } from "claude-code/testing";
-import { dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "../hooks/lib/confirm.mjs";
+import { dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable, statusText } from "../hooks/lib/confirm.mjs";
 
 const det = (o = {}) => ({ title: "Use PowerShell", body: "Run it in PowerShell.", tags: ["a", "b"], scope: "project", repeatOf: null, repeatKind: null, ...o });
 const item = (o = {}, d = {}) => ({ key: "k", detection: det(d), repoRoot: "/r", dismissed: 0, createdAt: "2026-10-01", ...o });
@@ -58,10 +58,9 @@ test("interpret", () => {
 test("onDismiss", () => {
   const it = item();
   const a = onDismiss(it);
-  expect(a.item.dismissed).toBe(1);
-  expect(a.toReview).toBe(false);
+  expect(a).toEqual({ ...it, dismissed: 1 });
   expect(it.dismissed).toBe(0);
-  expect(onDismiss(a.item).toReview).toBe(true);
+  expect(onDismiss(a).dismissed).toBe(2);
 });
 
 test("capDialog and interpretCap", () => {
@@ -151,4 +150,25 @@ test("every dialog shows the tags a save would write, and none when there are no
     expect(dialogFor(it, { ...ctx, target }).question).toContain("[tags: šumniki, claude p]");
   }
   expect(dialogFor(item({}, { tags: [] }), ctx).question).toBe('Lesson (project): "Use PowerShell" — Run it in PowerShell. Save it?');
+});
+
+test("dialog starts with the mistake", () => {
+  const prefix = "You corrected: ran it in Git Bash — ";
+  const m = { mistake: "ran it in Git Bash" };
+  expect(dialogFor(item({}, m), ctx).question.startsWith(prefix + "Lesson (")).toBe(true);
+  const lesson = item({}, { ...m, repeatOf: "P-012", repeatKind: "lesson" });
+  expect(dialogFor(lesson, { ...ctx, target: entry("P-012", "X") }).question.startsWith(prefix + "Looks like a repeat")).toBe(true);
+  const rule = item({}, { ...m, repeatOf: "P-003", repeatKind: "rule" });
+  expect(dialogFor(rule, { ...ctx, target: entry("P-003", "X") }).question.startsWith(prefix + "Rule P-003")).toBe(true);
+});
+
+test("an item without mistake has no prefix", () => {
+  expect(dialogFor(item(), ctx).question.startsWith("Lesson (")).toBe(true);
+  expect(dialogFor(item({}, { mistake: "" }), ctx).question.startsWith("Lesson (")).toBe(true);
+});
+
+test("statusText", () => {
+  expect(statusText(0)).toBeUndefined();
+  expect(statusText(1)).toBe("lessons: 1 to review");
+  expect(statusText(3)).toBe("lessons: 3 to review");
 });

@@ -10,7 +10,7 @@ const cases = [
   ...Array.from({ length: 15 }, (_, i) => ({ id: `N${pad(i + 1)}`, previousReply: `reply ${i}`, userMessage: `ok ${i}`, expect: "none" })),
 ];
 const ofKind = (kind: string) => cases.filter((c) => c.expect === kind).map((c) => c.id);
-const YES = '{"correction": true, "title": "T", "body": "B", "tags": ["x", "y"], "scope": "global", "repeatOf": null}';
+const YES = '{"correction": true, "mistake": "M", "title": "T", "body": "B", "tags": ["x", "y"], "scope": "global", "repeatOf": null}';
 const NO = '{"correction": false}';
 const replies = (text: string): any[] => cases.map(() => text);
 

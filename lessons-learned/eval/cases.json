@@ -178,5 +178,41 @@
     "previousReply": "I can either refactor the parser now or fix the failing test first. Which one?",
     "userMessage": "fix the test first, then the parser",
     "expect": "none"
+  },
+  {
+    "id": "N16",
+    "previousReply": "The download page now shows \"Download — Windows\" and \"Download — macOS\" on the buttons.",
+    "userMessage": "Remove the dashes from the English download button text",
+    "expect": "none"
+  },
+  {
+    "id": "N17",
+    "previousReply": "The settings screen has three free-text fields: Detector Model, Rule cap and Recall limit.",
+    "userMessage": "i would want options that users choose with the keyboard, with the default values filled in, so users don't guess what they are changing",
+    "expect": "none"
+  },
+  {
+    "id": "N18",
+    "previousReply": "I saved the lesson you confirmed and the tests pass.",
+    "userMessage": "this plugin fires far too often. for every small thing i write it pops up a dialog and it just annoys me. let's discuss how to make it better",
+    "expect": "none"
+  },
+  {
+    "id": "N19",
+    "previousReply": "PR #3 is merged into main and the plugin is updated to 0.1.1.",
+    "userMessage": "Delete the merged branches locally and on GitHub",
+    "expect": "none"
+  },
+  {
+    "id": "N20",
+    "previousReply": "The branch fix/settings is created from main.",
+    "userMessage": "Run the tests so we have a baseline before I make the fix",
+    "expect": "none"
+  },
+  {
+    "id": "N21",
+    "previousReply": "The config pickers for the first mod are done and released as 0.1.1.",
+    "userMessage": "ok, now do the same for the other mod",
+    "expect": "none"
   }
 ]

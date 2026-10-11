@@ -1,11 +1,11 @@
 # lessons-learned
 
-A Claude Code mod that makes your corrections stick. It notices when you correct Claude, asks you to confirm the point, and saves it as a **lesson**. When a later prompt touches the same topic, the lesson is attached to it. If you make the same correction again, the lesson is promoted to a **rule** that is loaded in every session.
+A Claude Code mod that makes your corrections stick. It notices when you correct Claude, keeps the point for you to confirm when it suits you, and saves it as a **lesson**. When a later prompt touches the same topic, the lesson is attached to it. If you make the same correction again, the lesson is promoted to a **rule** that is loaded in every session.
 
 ## How it works
 
-1. **Detect.** After each prompt, a short background model call decides whether your message corrects Claude in a way that should carry over to later work (a preference, a convention, a fact about your tools, a skipped process step). One-off steering such as "use the other file", answers to Claude's questions and changes of requirements do not count. This adds no wait to your prompt.
-2. **Confirm.** At the end of the turn a dialog shows the exact text that would be saved, for example `Lesson (project): "Use PowerShell for slash commands" [tags: powershell, slash-command] — Git Bash rewrites /cmd into a path. Save it?`. A repeat dialog also shows the title and tags a new lesson would get. Nothing is saved without your choice, and you can type a replacement text in the dialog's "Other" field.
+1. **Detect.** After each prompt, a short background model call decides whether your message corrects Claude in a way that should carry over to later work (a preference, a convention, a fact about your tools, a skipped process step). It only counts when it can name what Claude did wrong. One-off steering such as "use the other file", instructions for the task at hand, feature requests, complaints about a tool, answers to Claude's questions and changes of requirements do not count, and when unsure it lets the message go. This adds no wait to your prompt.
+2. **Confirm.** Nothing interrupts you while you work: a detected correction waits quietly, and the status line shows `lessons: 2 to review`. At the start of your next session one question asks *"lessons-learned has 2 possible lessons from earlier corrections. Review them now?"* (`Review now`, `Later`, `Discard all`). Reviewing shows one dialog per item with the exact text that would be saved, for example `You corrected: ran the command in Git Bash — Lesson (project): "Use PowerShell for slash commands" [tags: powershell, slash-command] — Git Bash rewrites /cmd into a path. Save it?`. A repeat dialog also shows the title and tags a new lesson would get. Nothing is saved without your choice, and you can type a replacement text in the dialog's "Other" field. `/lessons review` does the same at any time, and the `askAt` option can ask at every turn end instead, or never.
 3. **Recall.** A saved lesson is attached to later prompts whose words (or recently touched file paths) match its tags. At most 3 per prompt, and each lesson at most once per session.
 4. **Promote.** If the same correction comes up again, the dialog offers to promote the lesson to a rule. Rules live in a file that `CLAUDE.md` imports, so they load at the start of every session. If a rule is broken again, you can note it; its `seen` count then shows which rules are not working.
 
@@ -65,8 +65,8 @@ Outside a git repository only the global scope is used. `/lessons setup` asks ag
 
 | Command | Does |
 |---|---|
-| `/lessons` | Counts per scope and pending reviews, then every rule and lesson (id, title, seen). |
-| `/lessons review` | Goes through items you dismissed twice, with the same dialogs as at turn end. |
+| `/lessons` | Counts per scope and items waiting for review, then every rule and lesson (id, title, seen). |
+| `/lessons review` | Goes through the waiting items, one dialog each, the same as at session start. |
 | `/lessons promote <id>` | Moves a lesson to the rules file of its scope. If the scope is at its rule cap, asks which rule to demote. |
 | `/lessons demote <id>` | Moves a rule back to the lessons file. |
 | `/lessons delete <id>` | Asks for confirmation, then removes the entry. |
@@ -75,7 +75,7 @@ Outside a git repository only the global scope is used. `/lessons setup` asks ag
 | `/lessons resume` | Restarts capture. |
 | `/lessons eval` | Runs the detector against the bundled test cases (see Contributing). |
 
-If you close a dialog without answering, the item is offered again at the next turn end; dismissed twice, it moves to `/lessons review`. Corrections you have not answered yet are kept between sessions.
+Corrections you have not answered yet are kept between sessions, at most 10 (the newest are kept). Closing a dialog without answering stops the review and keeps the item; `Later` keeps all of them for the next session, and `Discard all` drops them without saving anything. Items from another repository wait for a session there. With `askAt` set to `turn end`, an item you dismissed twice is no longer asked at turn ends, only in a review.
 
 ## Options
 
@@ -86,6 +86,7 @@ Set in `/config`, where each option is a list you pick from with the keyboard; t
 | `model` | `haiku`, `sonnet`, `opus` | `haiku` | Model for the detector. |
 | `ruleCap` | `5`, `10`, `20`, `30`, `50` | `20` | Most rules kept per scope before you are asked to demote one. |
 | `maxRecall` | `1`, `2`, `3`, `5` | `3` | Most lessons attached to one prompt. |
+| `askAt` | `session start`, `never`, `turn end` | `session start` | When to ask about detected corrections: one question at session start; never (status line and `/lessons review` only); or a dialog at every turn end, as before 0.2.0. |
 
 ## Privacy
 
@@ -109,7 +110,7 @@ Claude Code with mod support. Tested with Claude Code 2.1.295 (the output of `cl
 ## Limitations
 
 - Prompts sent through Remote Control or channels are not captured: capture runs only for prompts typed at the terminal. In `claude -p` runs the mod only recalls; it creates no files there.
-- It is not yet known whether two plugins that ask a question at the same turn end get both dialogs, one, or an error; a dialog that does not appear counts as a dismissal and is offered again at the next turn end.
+- It is not yet known whether two plugins that ask a question at the same moment get both dialogs, one, or an error; a dialog that does not appear counts as a dismissal, and the item stays waiting.
 - Recall is keyword based: a lesson is attached when at least 2 of its tags (or one multi-word tag) appear in your prompt or the paths of recently touched files.
 - Lessons and rules are context for Claude, not enforcement; nothing blocks a tool call.
 
@@ -130,7 +131,7 @@ claude plugin test
 claude plugin validate .
 ```
 
-`/lessons eval` runs about 30 labelled cases (corrections and look-alikes) through the real detector, using your own credentials and costing a few cents. It prints how many corrections were detected and how many look-alikes were wrongly flagged; the target is zero false positives. Run it after changing the detector prompt, and add cases to `eval/cases.json`.
+`/lessons eval` runs about 36 labelled cases (corrections and look-alikes) through the real detector, using your own credentials and costing a few cents. It prints how many corrections were detected and how many look-alikes were wrongly flagged; the target is zero false positives. Run it after changing the detector prompt, and add cases to `eval/cases.json`.
 
 ## Licence
 

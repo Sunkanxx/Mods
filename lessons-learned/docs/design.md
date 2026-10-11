@@ -1,6 +1,7 @@
 # lessons-learned — design
 
-Status: built, version 0.1.0 (2026-10-09).
+Status: built, version 0.1.0 (2026-10-09). Version 0.2.0 (2026-10-11): a stricter detector and no
+dialogs while you work — see §12 for why; §5.2, §5.3, §5.6 and §6 describe 0.2.0.
 Repo: `github.com/Sunkanxx/Mods` (marketplace `sunkanxx-mods`), plugin folder `lessons-learned/`.
 
 ## 1. Purpose
@@ -105,10 +106,15 @@ Git Bash rewrites `/cmd` into a path, so run slash commands in `claude -p` from 
 ### 4.4 Mod-private state (`$.store`, kept between sessions)
 
 - `optOut:<repo root>`: the user answered "Not here" to project setup.
-- `queue`: detected corrections not yet answered (with their dismiss count), so closing a
-  session before the dialog loses nothing; offered at the next turn end in any session (an item
-  tied to a repo only in a session of that repo).
-- `review`: items dismissed twice, waiting for `/lessons review`.
+- `queue`: detected corrections not yet answered (with their dismiss count), at most 10, the
+  newest kept. Offered by the session-start question (§5.3), `/lessons review`, or — with
+  `askAt = turn end` — at turn ends; an item tied to a repo only in a session of that repo.
+- `review`: the 0.1.x list of items dismissed twice. Read once at session start, moved into
+  `queue` (cap applied) and deleted; nothing writes it any more.
+- `offeredSessions`: the ids of the last 20 sessions that started with someone to answer,
+  recorded at a session's first start whether or not anything waits, so a module reload
+  (`/reload-plugins`, an update) later in the same session never asks, and sessions open side
+  by side do not undo each other's record.
 
 Session-only (memory): ids already recalled this session, recently touched paths, capture
 paused flag.
@@ -121,7 +127,7 @@ paused flag.
 | capture  | `prompt.submit` | start the background detector call; queue its result |
 | recall   | `prompt.submit` | attach matching lessons (and rules promoted this session) as hidden `context` blocks |
 | tracker  | `tool.call`     | record paths of Read / Edit / Write / Grep / Glob calls (last ~20) |
-| confirm  | `turn.complete` | show the confirmation dialog for the next queued item |
+| confirm  | `session.start` (and `turn.complete` with `askAt = turn end`) | one question about the waiting items, then a dialog per item; a status line count while items wait |
 | store    | (library)       | pure parse / serialise / move / clean / write functions |
 | commands | `/lessons`      | list, review, promote, demote, delete, setup, pause, resume, eval |
 
@@ -163,11 +169,20 @@ Detector system prompt (the wording may be tuned against the eval, the meaning n
 > *and* the point carries over to later work: a preference, a convention, a fact about their
 > environment or tools, or a process step that got skipped.
 >
+> **It counts only if you can name the mistake**: a specific thing the assistant did or said in
+> `<previous_reply>` that the user says was wrong. If you cannot point to one, it is not a
+> correction.
+>
 > **It doesn't count:** answering the assistant's question; changing their mind about this
 > task's requirements ("actually make it blue"); one-off steering ("use the other file"); new
-> requests; praise; venting with no point to carry forward.
+> requests or instructions for the current task, even when phrased with "must", "should" or
+> "always"; feature requests or changes to whatever is being built (code, docs, a product, a
+> tool, a plugin — including this one); complaints about a tool or product rather than about
+> the assistant's behaviour; praise; venting with no point to carry forward. **When unsure,
+> answer `{"correction": false}`.**
 >
-> If it counts, write one lesson: an imperative title (≤ 80 chars), a body of at most 2
+> If it counts, name the mistake in `mistake` (≤ 160 chars, what the assistant did, not what
+> it should do) and write one lesson: an imperative title (≤ 80 chars), a body of at most 2
 > sentences giving the rule and *why*, 2–5 lowercase tags that are specific (never generic
 > words like code, file, fix, bug), a scope (`project` if it depends on this repo's files,
 > tools or names, otherwise `global`), and `repeatOf` (the id from `<existing>` it restates,
@@ -175,9 +190,12 @@ Detector system prompt (the wording may be tuned against the eval, the meaning n
 > only. Write it in the user's language. Leave out secrets, credentials and personal data.
 >
 > Reply with JSON only: `{"correction": false}` or
-> `{"correction": true, "title": …, "body": …, "tags": […], "scope": …, "repeatOf": …}`.
+> `{"correction": true, "mistake": …, "title": …, "body": …, "tags": […], "scope": …, "repeatOf": …}`.
 
-Parsing: strip code fences, `JSON.parse`, validate every field. Invalid JSON, a timeout, an API
+Parsing: strip code fences, `JSON.parse`, validate every field. **A reply without a non-empty
+`mistake` is no correction** (0.2.0): the detector must point at something the assistant did.
+`mistake` is cleaned like a body (one line, `@` defused) and cut to 160 characters; it is kept
+in the queued item and shown in the dialog, never written to a lessons or rules file. Invalid JSON, a timeout, an API
 error or a disallowed model → treated as `{"correction": false}`, logged only to the debug log.
 An unknown `repeatOf` id → null. Scope `project` while the project is not set up → `global`.
 Tags are kept only when they are short keywords (§5.5); generic tags are dropped too. A lesson
@@ -185,13 +203,38 @@ left with no tags is still offered (it can only be recalled once it is a rule).
 
 ### 5.3 confirm
 
-At `turn.complete`, when the queue is not empty and the result of this turn's capture has
-arrived (waiting at most 5 seconds for it; a later result is queued for the next turn end),
-show the oldest item with `$.ui.ask`. A queued project-scope item is only offered in a
-session of that repo; so is a repeat of a `P-` entry, whatever scope the detector gave (it is
-stored as project scope), since another repo's `P-` id names an unrelated entry.
-"Other" (always present in the dialog) is the edit field: typed text replaces the body, keeps
-the detector's tags and scope, and goes through the same cleaning.
+**Nothing asks while you work** (0.2.0). A detection is added to `queue` silently, and the
+status line (`$.ui.status`) shows `lessons: N to review` while this session can take N items
+(project items only in their repo); it is cleared at 0. The count is refreshed at session start,
+when a detection is queued and after every answer.
+
+**When the mod asks** follows the `askAt` setting (§6):
+
+| `askAt` | Asks |
+|---|---|
+| `session start` (default) | once per session, at session start, when items are waiting: the question below |
+| `never` | never by itself: status line and `/lessons review` only |
+| `turn end` | the 0.1.x behaviour: at each answered turn end, the oldest item not yet dismissed twice, one dialog (waiting up to 5 s for that turn's detection) |
+
+**The session-start question** — *"lessons-learned has N possible lessons from earlier
+corrections. Review them now?"* (for one item: *"lessons-learned has 1 possible lesson from an
+earlier correction. Review it now?"*) with `Review now` · `Later` · `Discard all`:
+
+- **Review now** walks the items oldest first, one dialog each (the table below); a dismissed
+  dialog stops the walk and leaves that item and the rest waiting.
+- **Later** (or dismissing the question) keeps them for the next session.
+- **Discard all** removes every item this session can take; nothing is written to the files.
+
+It is asked after project setup (§5.1), in the same deferred step, and at most once per session
+id (`offeredSessions`, recorded at the first start even when nothing waits), so a module
+reload does not ask mid-session. Not asked while another dialog of this mod is open. Not asked when nobody can answer.
+
+**The item dialog.** A queued project-scope item is only offered in a session of that repo; so
+is a repeat of a `P-` entry, whatever scope the detector gave (it is stored as project scope),
+since another repo's `P-` id names an unrelated entry. "Other" (always present in the dialog)
+is the edit field: typed text replaces the body, keeps the detector's tags and scope, and goes
+through the same cleaning. Every question starts with *You corrected: <mistake> —* when the item
+has a `mistake` (items queued by 0.1.x have none and start with the rest).
 
 | Detector result | Question | Options |
 |---|---|---|
@@ -215,15 +258,16 @@ counts it on the lesson; neither saves a duplicate.
   dialog puts the correction back where it was, its dismiss count unchanged.
 - **Note it:** `seen` +1 and `last` = today on the rule. A high `seen` on a rule shows which rules
   are not working.
-- **Dismissed** (the ask rejects): the item stays queued and is offered again at the next turn
-  end; dismissed a second time, it moves to the `review` list in `$.store`.
-- Asks happen only at `turn.complete`, one at a time. Whether two plugins' simultaneous asks
-  queue, replace or reject is undocumented; the dismissal handling above makes all three
-  outcomes safe (see §9).
-- One dialog of this mod at a time, across turn ends, `/lessons` (review, delete, the cap dialog
-  of `promote`) and project setup: while one is open, a turn end asks nothing (the queue waits),
-  a `/lessons` command that needs a dialog answers "A lesson dialog is already open.", and the
-  project setup question waits for the next session start.
+- **Dismissed** (the ask rejects): the item stays in `queue` with its dismiss count +1. With
+  `askAt = turn end`, an item dismissed twice is no longer offered at turn ends, only by
+  `/lessons review` (and the session-start question, if that mode is chosen again).
+- **Cap:** queuing an 11th item drops the oldest one.
+- Whether two plugins' simultaneous asks queue, replace or reject is undocumented; the
+  dismissal handling above makes all three outcomes safe (see §9).
+- One dialog of this mod at a time, across the session-start question, turn ends, `/lessons`
+  (review, delete, the cap dialog of `promote`) and project setup: while one is open, a turn end
+  asks nothing (the queue waits), a `/lessons` command that needs a dialog answers "A lesson
+  dialog is already open.", and the project setup question waits for the next session start.
 
 ### 5.4 recall
 
@@ -279,8 +323,8 @@ Pure functions over file text, plus one writer.
 
 | Command | Does |
 |---|---|
-| `/lessons` | counts per scope, pending reviews, then every rule and lesson (id · title · seen) |
-| `/lessons review` | goes through the review list with the same dialogs as §5.3 |
+| `/lessons` | counts per scope, items waiting for review, then every rule and lesson (id · title · seen) |
+| `/lessons review` | goes through the waiting items with the same dialogs as §5.3 |
 | `/lessons promote <id>` · `demote <id>` | moves an entry between the files of its scope (cap dialog on promote) |
 | `/lessons delete <id>` | asks for confirmation, then removes the entry |
 | `/lessons setup` | runs project setup again (also after "Not here") |
@@ -294,6 +338,7 @@ Pure functions over file text, plus one writer.
 | `model` | `haiku`, `sonnet`, `opus` | `haiku` | model for the detector |
 | `ruleCap` | `5`, `10`, `20`, `30`, `50` | `20` | maximum rules per scope |
 | `maxRecall` | `1`, `2`, `3`, `5` | `3` | maximum lessons attached per prompt |
+| `askAt` | `session start`, `never`, `turn end` | `session start` | when the mod asks about detected corrections (§5.3) |
 
 Each key is a `string` field with `options`, so `/config` draws it as a picker with the default selected,
 and a stored value outside the list counts as unset (the default applies). The numbers arrive as strings;
@@ -313,6 +358,8 @@ Claude read, so a planted instruction could travel reply → lesson → rule. De
 3. The detector prompt treats the tagged blocks as data; the JSON object in its reply is parsed
    and validated field by field.
 4. Recall frames attached lessons as "lessons the user confirmed", inside a context block.
+5. `mistake` (0.2.0) is shown in dialogs only and never written to a file; it is cleaned like a
+   body before it is stored in the queue, and the queue is capped at 10 items.
 
 Privacy (README): the detector sends the prompt, the last ~6,000 characters of the previous
 reply, the id, title, tags and kind of every existing entry, and whether the project is set up
@@ -327,8 +374,11 @@ points to "keep out of git".
 |---|---|
 | Invalid JSON, timeout, API error, model not allowed | no correction; debug log only |
 | Project not set up or opted out | scope `project` becomes `global`; no project option in the dialog |
-| Several corrections before an answer | queued, one dialog per turn end, oldest first |
-| Turn interrupted (Esc) | queue kept; offered at the next turn end |
+| Several corrections before an answer | queued silently (at most 10, newest kept); asked about at the next session start, oldest first |
+| Turn interrupted (Esc) | queue kept (with `askAt = turn end`: offered at the next turn end) |
+| Detector reply without `mistake` | no correction; nothing queued |
+| Items queued or reviewed by 0.1.x | `review` items move into `queue` at session start; items without `mistake` are offered without the "You corrected" line |
+| Module reloaded mid-session | the session-start question is not asked (`offeredSessions`), even if items were queued since the start |
 | Hand-edited or malformed files | unparseable blocks kept verbatim; ids continue from the highest |
 | Files deleted by hand | recreated (empty, with header) at the next session start |
 | Block removed from `CLAUDE.md` by hand | global: re-inserted; project: treated as not set up, setup asks again |
@@ -354,7 +404,10 @@ points to "keep out of git".
 5. **Detector eval (`/lessons eval`, outside the suite; runs through the user's own Claude Code credentials):** ~30 labelled pairs (previous reply,
    user message) split between corrections and look-alikes ("use the other file", "B",
    "actually make it blue"), run against the real model. Target: zero false positives on the
-   look-alikes; a few cents per run.
+   look-alikes; a few cents per run. 0.2.0 adds look-alikes taken from real false alarms: a
+   one-off task instruction ("remove the dashes from the download button text"), a feature
+   request about the mod itself, a complaint about the mod, and everyday directions ("delete the
+   merged branches", "run the tests").
 6. **Concurrent-ask spike (throwaway, before building confirm):** two hooks calling `$.ui.ask`
    at the same turn end, to learn whether the second queues, replaces or rejects. If it replaces
    or rejects silently, confirm adds a short delay and one retry. The spike code is not kept.
@@ -409,3 +462,27 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
    (`DETECTOR_SYSTEM`, `buildDetectorPrompt`, `parseDetectorReply`, same request) and the shipped
    `eval/cases.json`, run as `claude -p` under the normal login; `/lessons eval` itself was not run, to keep
    the real `~/.claude` untouched.
+5. **Detector eval, 0.2.0 (2026-10-11):** `Detected: 15/15 · False positives: 0/21` with model
+   `haiku`, after 0 tuning rounds, on the shipped `eval/cases.json` (the 15 look-alikes of 0.1.0
+   plus N16–N21 from real false alarms). Same method as item 4: a throwaway harness plugin
+   reusing `DETECTOR_SYSTEM`, `buildDetectorPrompt` and `parseDetectorReply`, run with `claude -p`.
+   Every detected correction came with a `mistake` naming what the assistant did.
+
+## 12. Version 0.2.0: fewer interruptions (2026-10-11)
+
+**Why.** In daily use the "Save it?" dialog came up after many ordinary prompts: instructions for
+the task at hand, feature requests, even a complaint about the mod were taken as corrections.
+Of everything it asked in the first two days, one lesson was saved. A dialog at almost every
+turn end made the mod an annoyance instead of a help.
+
+**What changed.**
+
+1. **Stricter detector** (§5.2): it has to name the mistake (`mistake`), the "doesn't count" list
+   names task instructions, feature requests and complaints about tools, and when unsure the
+   answer is no. The eval gained the real false alarms as look-alikes (§9.5).
+2. **No dialogs while working** (§5.3): detections wait silently in a queue of at most 10, the
+   status line shows the count, and one question at session start offers to review them.
+3. **`askAt` setting** (§6): `session start` (default), `never`, or `turn end` (the old
+   behaviour).
+
+Recall, rules, promotion and the file formats are unchanged.

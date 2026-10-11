@@ -8,7 +8,8 @@ function other(scope) {
   return scope === "global" ? "project" : "global";
 }
 
-function truncate(text, max) {
+// Cut to max code points, "…" appended when cut.
+export function truncate(text, max) {
   const chars = Array.from(text);
   return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
 }
@@ -23,8 +24,13 @@ function tagsText(tags) {
 // now) and also shows the new lesson's title and tags: Save as new, text typed under Other
 // and the fallback for a target gone meanwhile all save a new lesson under them.
 export function dialogFor(item, ctx) {
-  const d = item.detection;
-  const target = ctx.target;
+  const dialog = baseDialog(item.detection, ctx.target, ctx.projectAvailable);
+  // Items queued by 0.1.x have no mistake; their question starts with the rest.
+  const mistake = item.detection.mistake;
+  return typeof mistake === "string" && mistake ? { ...dialog, question: `You corrected: ${mistake} — ${dialog.question}` } : dialog;
+}
+
+function baseDialog(d, target, projectAvailable) {
   const titled = `"${d.title}"${tagsText(d.tags)}`;
   const asNew = `(as a new ${d.scope} lesson: ${titled}).`;
   if (target && d.repeatKind === "lesson") {
@@ -44,7 +50,7 @@ export function dialogFor(item, ctx) {
     };
   }
   const options = ["Save"];
-  if (ctx.projectAvailable) options.push(d.scope === "global" ? "Save to project" : "Save as global");
+  if (projectAvailable) options.push(d.scope === "global" ? "Save to project" : "Save as global");
   options.push("Skip");
   return {
     kind: "new",
@@ -73,8 +79,24 @@ export function interpret(answer, item, dialog) {
 }
 
 export function onDismiss(item) {
-  const dismissed = item.dismissed + 1;
-  return { item: { ...item, dismissed }, toReview: dismissed >= 2 };
+  return { ...item, dismissed: item.dismissed + 1 };
+}
+
+export const REVIEW_NOW = "Review now";
+export const LATER = "Later";
+export const DISCARD_ALL = "Discard all";
+
+// The one question at session start about the items waiting (spec §5.3).
+export function reviewQuestion(n) {
+  const question = n === 1
+    ? "lessons-learned has 1 possible lesson from an earlier correction. Review it now?"
+    : `lessons-learned has ${n} possible lessons from earlier corrections. Review them now?`;
+  return { question, options: [REVIEW_NOW, LATER, DISCARD_ALL], header: HEADER };
+}
+
+// The status line while items wait (spec §5.3); undefined clears it.
+export function statusText(n) {
+  return n > 0 ? `lessons: ${n} to review` : undefined;
 }
 
 function candidateLabel(rule) {

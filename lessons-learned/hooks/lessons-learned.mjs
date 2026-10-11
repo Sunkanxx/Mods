@@ -13,10 +13,15 @@ import { hasBlock, insertBlock, addIgnoreLines, pickClaudeMd } from "./lib/claud
 import { joinPath, configDirFrom, scopeFiles, selfAndParents } from "./lib/paths.mjs";
 import { DETECTOR_SYSTEM, shouldSkip, buildDetectorPrompt, parseDetectorReply } from "./lib/detector.mjs";
 import { matchLessons, formatBlock, RECALL_LEAD, RULES_LEAD, rememberPath } from "./lib/recall.mjs";
-import { HEADER, dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "./lib/confirm.mjs";
+import { HEADER, dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable, statusText,
+  reviewQuestion, REVIEW_NOW, DISCARD_ALL } from "./lib/confirm.mjs";
 
 export const KEY_QUEUE = "queue";
+// 0.1.x only: read once at session start and folded into the queue (spec §4.4).
 export const KEY_REVIEW = "review";
+export const KEY_STARTED = "offeredSessions";
+// Session ids kept in KEY_STARTED: enough for every session open side by side.
+const SESSIONS_KEPT = 20;
 export const optOutKey = (root) => `optOut:${root}`;
 
 const SETUP_QUESTION =
@@ -34,7 +39,11 @@ const BUSY = Symbol("busy");
 const DISMISSED = Symbol("dismissed");
 
 // Set by register(); later hooks read it.
-let cfg = { model: "haiku", ruleCap: 20, maxRecall: 3 };
+let cfg = { model: "haiku", ruleCap: 20, maxRecall: 3, askAt: "session start" };
+
+const ASK_AT = ["session start", "never", "turn end"];
+// The queue keeps the newest items (spec §5.3).
+export const QUEUE_CAP = 10;
 
 // Session-only state (spec §4.4). paused: capture is off (/lessons pause).
 // pendingDetection: the detector call of the latest prompt, resolving to its queued item (or
@@ -63,6 +72,7 @@ export function register(on, options) {
     model: options?.model || "haiku",
     ruleCap: Number(options?.ruleCap) || 20,
     maxRecall: Number(options?.maxRecall) || 3,
+    askAt: ASK_AT.includes(options?.askAt) ? options.askAt : "session start",
   };
   pendingDetection = null;
   asking = false;
@@ -111,9 +121,10 @@ export function register(on, options) {
 
   on("turn.complete", async ($, e, next) => {
     const done = await next(e);
-    // Not awaited here, as with the setup dialog: an open dialog must not hold the engine.
-    // An interrupted turn keeps the queue for the next answered one (spec §8).
-    if (e.reason === "answer" && !e.agentId) $.clock.after(0, () => void confirmLater($));
+    // Only with askAt = turn end (spec §5.3). Not awaited here, as with the setup dialog: an
+    // open dialog must not hold the engine. An interrupted turn keeps the queue for the next
+    // answered one (spec §8).
+    if (cfg.askAt === "turn end" && e.reason === "answer" && !e.agentId) $.clock.after(0, () => void confirmLater($));
     return done;
   });
 
@@ -135,7 +146,7 @@ export function register(on, options) {
     }
     // Not awaited here: the engine holds the first prompt until session.start resolves,
     // and a dialog the user leaves open must not do that.
-    $.clock.after(0, () => void offerProjectSetupLater($));
+    $.clock.after(0, () => void startLater($));
     return started;
   });
 
@@ -149,12 +160,21 @@ export function register(on, options) {
   });
 }
 
-async function offerProjectSetupLater($) {
+// The deferred part of session start: project setup first, then the waiting items, so the
+// two questions never open at once.
+async function startLater($) {
   try {
     // Another dialog of this mod is open: the setup question comes again at the next start.
     if ((await offerProjectSetup($, { force: false })) === BUSY) debug($, "setup question deferred: a dialog is open");
   } catch (err) {
     debug($, `project setup failed: ${err?.message ?? err}`);
+  }
+  try {
+    await migrateReview($);
+    await refreshStatus($);
+    if ((await firstStart($)) && cfg.askAt === "session start") await offerReview($);
+  } catch (err) {
+    debug($, `review question failed: ${err?.message ?? err}`);
   }
 }
 
@@ -374,8 +394,9 @@ async function detect($, { prompt, previousReply, key }) {
     let queued = null;
     await updateList($, KEY_QUEUE, (queue) => {
       queued = withUniqueKey(item, queue);
-      return [...queue, queued];
+      return [...queue, queued].slice(-QUEUE_CAP);
     });
+    await refreshStatus($);
     return queued;
   } catch (err) {
     debug($, `detector failed: ${err?.message ?? err}`);
@@ -448,6 +469,73 @@ async function changeList($, key, mutate) {
 
 // ---------- confirm (spec §5.3) ----------
 
+// The status line counts the waiting items this session can take; cleared at 0. Never rejects.
+async function refreshStatus($) {
+  try {
+    const { repoRoot } = await context($);
+    const n = (await readList($, KEY_QUEUE)).filter((i) => offerable(i, repoRoot)).length;
+    await $.ui.status(statusText(n));
+  } catch (err) {
+    debug($, `status not updated: ${err?.message ?? err}`);
+  }
+}
+
+// 0.1.x moved items dismissed twice to a review list; they join the queue once.
+async function migrateReview($) {
+  if ((await $.store.get(KEY_REVIEW)) === undefined) return;
+  const items = await readList($, KEY_REVIEW);
+  if (items.length > 0) {
+    await updateList($, KEY_QUEUE, (queue) =>
+      items.reduce((list, i) => [...list, withUniqueKey(i, list)], queue).slice(-QUEUE_CAP));
+  }
+  await $.store.delete(KEY_REVIEW);
+}
+
+// True at the first start of a session someone can answer, recorded whether or not anything
+// waits: session.start fires again on a module reload (/reload-plugins, an update), and that
+// must not ask mid-session. The last SESSIONS_KEPT ids are kept, so sessions open side by side
+// do not undo each other's record.
+async function firstStart($) {
+  if ((await $.session.surfaces()).length === 0) return false;
+  const sessionId = String(await $.session.id());
+  const stored = await $.store.get(KEY_STARTED);
+  const started = Array.isArray(stored) ? stored : [];
+  if (started.includes(sessionId)) return false;
+  await $.store.set(KEY_STARTED, [...started, sessionId].slice(-SESSIONS_KEPT));
+  return true;
+}
+
+// The one question about the items this session can take. Skipped when another dialog of
+// this mod is open; the items wait for /lessons review or the next session.
+async function offerReview($) {
+  const result = await withAsk(async () => {
+    const ctx = await context($);
+    const items = (await readList($, KEY_QUEUE)).filter((i) => offerable(i, ctx.repoRoot));
+    if (items.length === 0) return;
+    const q = reviewQuestion(items.length);
+    const answer = await ask($, q.question, q.options, "review question");
+    if (answer === REVIEW_NOW) {
+      await walkItems($, ctx, items);
+    } else if (answer === DISCARD_ALL) {
+      const gone = new Set(items.map((i) => i.key));
+      await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => !gone.has(i.key)));
+    }
+  });
+  if (result === BUSY) debug($, "review question skipped: a dialog is open");
+  await refreshStatus($);
+}
+
+// One dialog per item, oldest first; the first one not answered stops the walk. Resolves to
+// the number answered. The caller holds the dialog flag.
+async function walkItems($, ctx, items) {
+  let answered = 0;
+  for (const item of items) {
+    if (!(await confirmItem($, item, ctx))) break;
+    answered++;
+  }
+  return answered;
+}
+
 async function confirmLater($) {
   try {
     await runConfirm($);
@@ -466,15 +554,15 @@ export async function runConfirm($) {
     // Nobody can answer (claude -p): an ask would reject and count as a dismissal.
     if ((await $.session.surfaces()).length === 0) return;
     const ctx = await context($);
-    const item = (await readList($, KEY_QUEUE)).find((i) => offerable(i, ctx.repoRoot));
-    if (item) await confirmItem($, item, ctx, KEY_QUEUE);
+    // An item dismissed twice waits for /lessons review or the session-start question.
+    const item = (await readList($, KEY_QUEUE)).find((i) => i.dismissed < 2 && offerable(i, ctx.repoRoot));
+    if (item) await confirmItem($, item, ctx);
   });
 }
 
-// Asks about one stored item and applies the answer. True when answered (the item leaves its
-// list); a dismissal counts against a queued item and leaves a review item where it is.
-// The caller holds the dialog flag.
-async function confirmItem($, queued, ctx, listKey) {
+// Asks about one queued item and applies the answer. True when answered (the item leaves the
+// queue); a dismissal counts against it. The caller holds the dialog flag.
+async function confirmItem($, queued, ctx) {
   const projectAvailable = !!ctx.project?.setUp;
   // The project is no longer set up: the lesson can only go to the global scope (spec §8).
   const scoped = queued.detection.scope === "project" && !projectAvailable
@@ -487,25 +575,21 @@ async function confirmItem($, queued, ctx, listKey) {
   const dialog = dialogFor(item, { projectAvailable, target });
   const answer = await ask($, dialog.question, dialog.options, "confirmation");
   if (answer === DISMISSED) {
-    if (listKey === KEY_QUEUE) await dismiss($, queued);
+    await dismiss($, queued);
     return false;
   }
-  await updateList($, listKey, (list) => list.filter((i) => i.key !== queued.key));
-  if (await applyAction($, item, interpret(answer, item, dialog))) return true;
+  await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => i.key !== queued.key));
+  const applied = await applyAction($, item, interpret(answer, item, dialog));
   // The cap dialog was dismissed: the correction goes back, its dismiss count unchanged.
-  await updateList($, listKey, (list) => [queued, ...list]);
-  return false;
+  if (!applied) await updateList($, KEY_QUEUE, (queue) => [queued, ...queue]);
+  await refreshStatus($);
+  return applied;
 }
 
-// Dismissed once: offered again at the next turn end. Twice: moved to the review list.
+// The item stays queued with its dismiss count +1; twice dismissed, turn ends skip it.
 async function dismiss($, item) {
-  const { item: next, toReview } = onDismiss(item);
-  if (!toReview) {
-    await updateList($, KEY_QUEUE, (queue) => queue.map((i) => (i.key === item.key ? next : i)));
-    return;
-  }
-  await updateList($, KEY_REVIEW, (review) => [...review, next]);
-  await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => i.key !== item.key));
+  const next = onDismiss(item);
+  await updateList($, KEY_QUEUE, (queue) => queue.map((i) => (i.key === item.key ? next : i)));
 }
 
 const scopeOfId = (id) => (id.startsWith("P-") ? "project" : "global");
@@ -653,7 +737,7 @@ async function listText($) {
   }
   // Only what /lessons review would offer here.
   const { repoRoot } = await context($);
-  const toReview = (await readList($, KEY_REVIEW)).filter((i) => offerable(i, repoRoot)).length;
+  const toReview = (await readList($, KEY_QUEUE)).filter((i) => offerable(i, repoRoot)).length;
   if (toReview > 0) counts.push(`${toReview} to review`);
   const lines = [counts.length > 0 ? counts.join(" · ") : "Nothing saved yet."];
   if (rules.length > 0) lines.push("", "Rules", ...rules.map(entryLine));
@@ -661,18 +745,14 @@ async function listText($) {
   return lines.join("\n");
 }
 
-// Walks the review list: one dialog per item, the same as at a turn end.
+// Walks the waiting items: one dialog per item, the same as at session start.
 async function reviewText($) {
   const text = await withAsk(async () => {
     const ctx = await context($);
-    const items = (await readList($, KEY_REVIEW)).filter((i) => offerable(i, ctx.repoRoot));
+    const items = (await readList($, KEY_QUEUE)).filter((i) => offerable(i, ctx.repoRoot));
     if (items.length === 0) return "Nothing to review.";
     if ((await $.session.surfaces()).length === 0) return "No dialog can be shown in this run.";
-    let answered = 0;
-    for (const item of items) {
-      if (!(await confirmItem($, item, ctx, KEY_REVIEW))) break;
-      answered++;
-    }
+    const answered = await walkItems($, ctx, items);
     const left = items.length - answered;
     return `Reviewed ${plural(answered, "item")}${left > 0 ? `, ${left} left` : ""}.`;
   });

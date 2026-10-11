@@ -8,7 +8,7 @@
     {
       "name": "lessons-learned",
       "source": "./lessons-learned",
-      "description": "Learns from your corrections: confirms each one, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session."
+      "description": "Learns from your corrections: keeps each one for you to confirm at session start, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session."
     },
     {
       "name": "last-call",
