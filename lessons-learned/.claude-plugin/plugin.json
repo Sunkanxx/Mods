@@ -1,7 +1,7 @@
 {
   "name": "lessons-learned",
-  "version": "0.1.1",
-  "description": "Learns from your corrections: confirms each one, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session.",
+  "version": "0.2.0",
+  "description": "Learns from your corrections: keeps each one for you to confirm at session start, recalls the lesson when it is relevant again, and turns a repeated correction into a rule CLAUDE.md loads in every session.",
   "author": { "name": "Sunkanxx" },
   "license": "MIT",
   "userConfig": {

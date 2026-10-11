@@ -215,7 +215,8 @@ when a detection is queued and after every answer.
 | `turn end` | the 0.1.x behaviour: at each answered turn end, the oldest item not yet dismissed twice, one dialog (waiting up to 5 s for that turn's detection) |
 
 **The session-start question** — *"lessons-learned has N possible lessons from earlier
-corrections. Review them now?"* with `Review now` · `Later` · `Discard all`:
+corrections. Review them now?"* (for one item: *"lessons-learned has 1 possible lesson from an
+earlier correction. Review it now?"*) with `Review now` · `Later` · `Discard all`:
 
 - **Review now** walks the items oldest first, one dialog each (the table below); a dismissed
   dialog stops the walk and leaves that item and the rest waiting.
@@ -458,6 +459,11 @@ Throwaway probe plugins (two plugins, a workdir with a `CLAUDE.md`) run with
    (`DETECTOR_SYSTEM`, `buildDetectorPrompt`, `parseDetectorReply`, same request) and the shipped
    `eval/cases.json`, run as `claude -p` under the normal login; `/lessons eval` itself was not run, to keep
    the real `~/.claude` untouched.
+5. **Detector eval, 0.2.0 (2026-10-11):** `Detected: 15/15 · False positives: 0/21` with model
+   `haiku`, after 0 tuning rounds, on the shipped `eval/cases.json` (the 15 look-alikes of 0.1.0
+   plus N16–N21 from real false alarms). Same method as item 4: a throwaway harness plugin
+   reusing `DETECTOR_SYSTEM`, `buildDetectorPrompt` and `parseDetectorReply`, run with `claude -p`.
+   Every detected correction came with a `mistake` naming what the assistant did.
 
 ## 12. Version 0.2.0: fewer interruptions (2026-10-11)
 
