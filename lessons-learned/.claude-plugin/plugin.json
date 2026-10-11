@@ -25,6 +25,13 @@
       "description": "The most lessons attached to one prompt.",
       "options": ["1", "2", "3", "5"],
       "default": "3"
+    },
+    "askAt": {
+      "type": "string",
+      "title": "When to ask",
+      "description": "When to ask about detected corrections: at session start, never (status line and /lessons review only), or at every turn end.",
+      "options": ["session start", "never", "turn end"],
+      "default": "session start"
     }
   }
 }

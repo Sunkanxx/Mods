@@ -79,8 +79,12 @@ export function interpret(answer, item, dialog) {
 }
 
 export function onDismiss(item) {
-  const dismissed = item.dismissed + 1;
-  return { item: { ...item, dismissed }, toReview: dismissed >= 2 };
+  return { ...item, dismissed: item.dismissed + 1 };
+}
+
+// The status line while items wait (spec §5.3); undefined clears it.
+export function statusText(n) {
+  return n > 0 ? `lessons: ${n} to review` : undefined;
 }
 
 function candidateLabel(rule) {

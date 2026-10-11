@@ -13,7 +13,7 @@ import { hasBlock, insertBlock, addIgnoreLines, pickClaudeMd } from "./lib/claud
 import { joinPath, configDirFrom, scopeFiles, selfAndParents } from "./lib/paths.mjs";
 import { DETECTOR_SYSTEM, shouldSkip, buildDetectorPrompt, parseDetectorReply } from "./lib/detector.mjs";
 import { matchLessons, formatBlock, RECALL_LEAD, RULES_LEAD, rememberPath } from "./lib/recall.mjs";
-import { HEADER, dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable } from "./lib/confirm.mjs";
+import { HEADER, dialogFor, interpret, onDismiss, capDialog, interpretCap, offerable, statusText } from "./lib/confirm.mjs";
 
 export const KEY_QUEUE = "queue";
 export const KEY_REVIEW = "review";
@@ -34,7 +34,11 @@ const BUSY = Symbol("busy");
 const DISMISSED = Symbol("dismissed");
 
 // Set by register(); later hooks read it.
-let cfg = { model: "haiku", ruleCap: 20, maxRecall: 3 };
+let cfg = { model: "haiku", ruleCap: 20, maxRecall: 3, askAt: "session start" };
+
+const ASK_AT = ["session start", "never", "turn end"];
+// The queue keeps the newest items (spec §5.3).
+export const QUEUE_CAP = 10;
 
 // Session-only state (spec §4.4). paused: capture is off (/lessons pause).
 // pendingDetection: the detector call of the latest prompt, resolving to its queued item (or
@@ -63,6 +67,7 @@ export function register(on, options) {
     model: options?.model || "haiku",
     ruleCap: Number(options?.ruleCap) || 20,
     maxRecall: Number(options?.maxRecall) || 3,
+    askAt: ASK_AT.includes(options?.askAt) ? options.askAt : "session start",
   };
   pendingDetection = null;
   asking = false;
@@ -111,9 +116,10 @@ export function register(on, options) {
 
   on("turn.complete", async ($, e, next) => {
     const done = await next(e);
-    // Not awaited here, as with the setup dialog: an open dialog must not hold the engine.
-    // An interrupted turn keeps the queue for the next answered one (spec §8).
-    if (e.reason === "answer" && !e.agentId) $.clock.after(0, () => void confirmLater($));
+    // Only with askAt = turn end (spec §5.3). Not awaited here, as with the setup dialog: an
+    // open dialog must not hold the engine. An interrupted turn keeps the queue for the next
+    // answered one (spec §8).
+    if (cfg.askAt === "turn end" && e.reason === "answer" && !e.agentId) $.clock.after(0, () => void confirmLater($));
     return done;
   });
 
@@ -374,8 +380,9 @@ async function detect($, { prompt, previousReply, key }) {
     let queued = null;
     await updateList($, KEY_QUEUE, (queue) => {
       queued = withUniqueKey(item, queue);
-      return [...queue, queued];
+      return [...queue, queued].slice(-QUEUE_CAP);
     });
+    await refreshStatus($);
     return queued;
   } catch (err) {
     debug($, `detector failed: ${err?.message ?? err}`);
@@ -448,6 +455,17 @@ async function changeList($, key, mutate) {
 
 // ---------- confirm (spec §5.3) ----------
 
+// The status line counts the waiting items this session can take; cleared at 0. Never rejects.
+async function refreshStatus($) {
+  try {
+    const { repoRoot } = await context($);
+    const n = (await readList($, KEY_QUEUE)).filter((i) => offerable(i, repoRoot)).length;
+    await $.ui.status(statusText(n));
+  } catch (err) {
+    debug($, `status not updated: ${err?.message ?? err}`);
+  }
+}
+
 async function confirmLater($) {
   try {
     await runConfirm($);
@@ -466,7 +484,8 @@ export async function runConfirm($) {
     // Nobody can answer (claude -p): an ask would reject and count as a dismissal.
     if ((await $.session.surfaces()).length === 0) return;
     const ctx = await context($);
-    const item = (await readList($, KEY_QUEUE)).find((i) => offerable(i, ctx.repoRoot));
+    // An item dismissed twice waits for /lessons review or the session-start question.
+    const item = (await readList($, KEY_QUEUE)).find((i) => i.dismissed < 2 && offerable(i, ctx.repoRoot));
     if (item) await confirmItem($, item, ctx, KEY_QUEUE);
   });
 }
@@ -491,21 +510,17 @@ async function confirmItem($, queued, ctx, listKey) {
     return false;
   }
   await updateList($, listKey, (list) => list.filter((i) => i.key !== queued.key));
-  if (await applyAction($, item, interpret(answer, item, dialog))) return true;
+  const applied = await applyAction($, item, interpret(answer, item, dialog));
   // The cap dialog was dismissed: the correction goes back, its dismiss count unchanged.
-  await updateList($, listKey, (list) => [queued, ...list]);
-  return false;
+  if (!applied) await updateList($, listKey, (list) => [queued, ...list]);
+  await refreshStatus($);
+  return applied;
 }
 
-// Dismissed once: offered again at the next turn end. Twice: moved to the review list.
+// The item stays queued with its dismiss count +1; twice dismissed, turn ends skip it.
 async function dismiss($, item) {
-  const { item: next, toReview } = onDismiss(item);
-  if (!toReview) {
-    await updateList($, KEY_QUEUE, (queue) => queue.map((i) => (i.key === item.key ? next : i)));
-    return;
-  }
-  await updateList($, KEY_REVIEW, (review) => [...review, next]);
-  await updateList($, KEY_QUEUE, (queue) => queue.filter((i) => i.key !== item.key));
+  const next = onDismiss(item);
+  await updateList($, KEY_QUEUE, (queue) => queue.map((i) => (i.key === item.key ? next : i)));
 }
 
 const scopeOfId = (id) => (id.startsWith("P-") ? "project" : "global");

@@ -213,9 +213,11 @@ const turnEnd = async ($: any, seen: any) => {
   await $.turn.complete({ answer: "Done.", reason: "answer", durationMs: 1, isAborted: false, turnId: "t" });
   await seen.clock.advance(0);
 };
+// These dialogs open at turn ends; by default the mod asks at session start instead.
+const TURN_END = { options: { askAt: "turn end" } } as any;
 const GLOBAL_ONLY = { [G.lessons]: fileOf("lessons", [entry("G-002", "Quote it")]), [G.rules]: fileOf("rules"), [G.md]: insertBlock(null, "rules-learned.md") };
 
-test("while a turn-end dialog is open, /lessons delete, promote at the cap and setup do not ask", { options: { ruleCap: "5" } } as any, async ($: any, on: any) => {
+test("while a turn-end dialog is open, /lessons delete, promote at the cap and setup do not ask", { options: { ruleCap: "5", askAt: "turn end" } } as any, async ($: any, on: any) => {
   const seen = setUp(on, {
     files: { ...GLOBAL_ONLY, [G.rules]: fileOf("rules", FIVE_RULES) },
     store: { queue: [queuedGlobal] },
@@ -232,7 +234,7 @@ test("while a turn-end dialog is open, /lessons delete, promote at the cap and s
   expect(seen.store.get("queue")).toEqual([]);
 });
 
-test("a turn end while a /lessons dialog is open asks nothing and keeps the queue", async ($: any, on: any) => {
+test("a turn end while a /lessons dialog is open asks nothing and keeps the queue", TURN_END, async ($: any, on: any) => {
   const seen = setUp(on, { files: GLOBAL_ONLY, store: { queue: [queuedGlobal] }, asks: [{ answer: "Keep", delay: 1000 }, "Skip"] });
   const deleting = run($, "delete G-002");
   await seen.clock.advance(0);
@@ -246,7 +248,7 @@ test("a turn end while a /lessons dialog is open asks nothing and keeps the queu
   expect(seen.store.get("queue")).toEqual([]);
 });
 
-test("the project setup ask is skipped while a lesson dialog is open", async ($: any, on: any) => {
+test("the project setup ask is skipped while a lesson dialog is open", TURN_END, async ($: any, on: any) => {
   const seen = setUp(on, { files: GLOBAL_ONLY, store: { queue: [queuedGlobal] }, asks: [{ answer: "Skip", delay: 1000 }, "Not here"] });
   await turnEnd($, seen);
   await $.session.start({ cwd: REPO } as any);

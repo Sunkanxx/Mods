@@ -35,6 +35,7 @@ import { mock } from "claude-code/testing";
 //   asks       { question, options }[]   every $.ui.ask made
 //   headers    (string | undefined)[]    the header of every $.ui.ask, in the same order
 //   logs       { text, to }[]      every $.ui.log
+//   statuses   (string | undefined)[]   every $.ui.status text, in order (undefined clears)
 //   modelCalls ModelCompleteRequest[]    every $.model.complete request
 //   commands   every $.command.register request
 //   store      Map<key, value>     the current $.store (a stub that JSON-round-trips values, with
@@ -84,6 +85,7 @@ export function world(on: any, opts: WorldOptions = {}) {
     asks: [] as { question: string; options: string[] }[],
     headers: [] as (string | undefined)[],
     logs: [] as { text: string; to: string }[],
+    statuses: [] as (string | undefined)[],
     modelCalls: [] as any[],
     commands: [] as any[],
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
@@ -165,6 +167,7 @@ export function world(on: any, opts: WorldOptions = {}) {
   on("store.keys", () => ({ value: store.keys() }));
   on("command.register", (_$: any, e: any) => ({ value: void seen.commands.push(e) }));
   on("ui.log", (_$: any, e: any) => ({ value: log(e.text, e.to) }));
+  on("ui.status", (_$: any, e: any) => ({ value: void seen.statuses.push(e.text) }));
   // $.ui.ask is a tool.call of AskUserQuestion.
   on("tool.call", async (_$: any, e: any) => {
     if (opts.allowTools?.includes(e.tool)) return { result: "", text: "" };
@@ -188,7 +191,7 @@ export function world(on: any, opts: WorldOptions = {}) {
     },
     session: asyncOf(session),
     store: asyncOf(store),
-    ui: { log: (text: string, o?: any) => log(text, o?.to ?? "transcript"), ask: async (q: string, o: any) => ask(q, Array.isArray(o) ? o : o?.options ?? [], Array.isArray(o) ? undefined : o?.header) },
+    ui: { status: (text: string | undefined) => void seen.statuses.push(text), log: (text: string, o?: any) => log(text, o?.to ?? "transcript"), ask: async (q: string, o: any) => ask(q, Array.isArray(o) ? o : o?.options ?? [], Array.isArray(o) ? undefined : o?.header) },
     model: asyncOf({ complete }),
   };
   return seen;

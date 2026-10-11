@@ -104,7 +104,7 @@ for (const [name, input, result] of NO_RESET) {
   });
 }
 
-test("attaches promoted rules once", async ($: any, on: any) => {
+test("attaches promoted rules once", { options: { askAt: "turn end" } } as any, async ($: any, on: any) => {
   const lesson = entry("P-004", "Use PowerShell", { tags: ["alpha", "beta"] });
   const seen = setUp(on, {
     files: filesWith({ pl: [lesson] }),
