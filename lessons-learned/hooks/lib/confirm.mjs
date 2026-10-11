@@ -82,6 +82,18 @@ export function onDismiss(item) {
   return { ...item, dismissed: item.dismissed + 1 };
 }
 
+export const REVIEW_NOW = "Review now";
+export const LATER = "Later";
+export const DISCARD_ALL = "Discard all";
+
+// The one question at session start about the items waiting (spec §5.3).
+export function reviewQuestion(n) {
+  const question = n === 1
+    ? "lessons-learned has 1 possible lesson from an earlier correction. Review it now?"
+    : `lessons-learned has ${n} possible lessons from earlier corrections. Review them now?`;
+  return { question, options: [REVIEW_NOW, LATER, DISCARD_ALL], header: HEADER };
+}
+
 // The status line while items wait (spec §5.3); undefined clears it.
 export function statusText(n) {
   return n > 0 ? `lessons: ${n} to review` : undefined;

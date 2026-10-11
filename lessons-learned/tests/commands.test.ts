@@ -50,7 +50,7 @@ test("lists counts, rules and lessons", async ($: any, on: any) => {
       pr: [entry("P-001", "Project rule")],
       pl: [entry("P-004", "Use PowerShell", { seen: 2 }), entry("P-005", "B"), entry("P-006", "C")],
     },
-    store: { review: [reviewItem("k1", "Pending")] },
+    store: { queue: [reviewItem("k1", "Pending")] },
   });
   const text = await run($);
   const lines = text.split("\n");
@@ -135,24 +135,24 @@ test("review with nothing says so", async ($: any, on: any) => {
 
 test("review asks once per item and removes the answered", async ($: any, on: any) => {
   const seen = setUp(on, {
-    store: { review: [reviewItem("k1", "First"), reviewItem("k2", "Second")] },
+    store: { queue: [reviewItem("k1", "First"), reviewItem("k2", "Second")] },
     asks: ["Save", "Skip"],
   });
   expect(await run($, "review")).toBe("Reviewed 2 items.");
   expect(seen.asks.map((a) => a.question)).toEqual(['Lesson (global): "First" [tags: alpha, beta] — Body. Save it?', 'Lesson (global): "Second" [tags: alpha, beta] — Body. Save it?']);
-  expect(seen.store.get("review")).toEqual([]);
+  expect(seen.store.get("queue")).toEqual([]);
   expect(ids(seen, G.lessons)).toEqual(["G-001"]);
 });
 
 test("a dismissed review item stays and stops the walk", async ($: any, on: any) => {
-  const seen = setUp(on, { store: { review: [reviewItem("k1", "First"), reviewItem("k2", "Second")] } });
+  const seen = setUp(on, { store: { queue: [reviewItem("k1", "First"), reviewItem("k2", "Second")] } });
   expect(await run($, "review")).toBe("Reviewed 0 items, 2 left.");
   expect(seen.asks).toHaveLength(1);
-  expect((seen.store.get("review") as any[]).map((i) => i.key)).toEqual(["k1", "k2"]);
+  expect((seen.store.get("queue") as any[]).map((i) => i.key)).toEqual(["k1", "k2"]);
 });
 
 test("review does not open a second dialog while one is open", async ($: any, on: any) => {
-  const seen = setUp(on, { store: { review: [reviewItem("k1", "First")] }, asks: [{ answer: "Save", delay: 1000 }] });
+  const seen = setUp(on, { store: { queue: [reviewItem("k1", "First")] }, asks: [{ answer: "Save", delay: 1000 }] });
   const first = run($, "review");
   await seen.clock.advance(0);
   expect(await run($, "review")).toBe("A lesson dialog is already open.");
@@ -198,9 +198,9 @@ test("pause stops capture while recall still runs; resume restores it", async ($
   expect(seen.modelCalls).toHaveLength(1);
 });
 
-test("/lessons counts only the review items this repo can take", async ($: any, on: any) => {
+test("/lessons counts only the waiting items this repo can take", async ($: any, on: any) => {
   setUp(on, {
-    store: { review: [reviewItem("k1", "Global"), reviewItem("k2", "Elsewhere", { scope: "project" }), { ...reviewItem("k3", "Here", { scope: "project" }), repoRoot: REPO }] },
+    store: { queue: [reviewItem("k1", "Global"), reviewItem("k2", "Elsewhere", { scope: "project" }), { ...reviewItem("k3", "Here", { scope: "project" }), repoRoot: REPO }] },
   });
   const first = (await run($)).split("\n")[0];
   expect(first).toBe("Global: 0 rules, 0 lessons · Project: 0 rules, 0 lessons · 2 to review");
